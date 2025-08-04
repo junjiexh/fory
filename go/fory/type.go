@@ -19,13 +19,14 @@ package fory
 
 import (
 	"fmt"
-	"github.com/apache/fory/go/fory/meta"
 	"hash/fnv"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/apache/fory/go/fory/meta"
 )
 
 type TypeId = int16
@@ -171,6 +172,19 @@ const (
 	FORY_ARROW_RECORD_BATCH     = 267
 	FORY_ARROW_TABLE            = 268
 )
+
+var polymorphicTypes = map[TypeId]struct{}{
+	STRUCT:                  {},
+	COMPATIBLE_STRUCT:       {},
+	NAMED_STRUCT:            {},
+	NAMED_COMPATIBLE_STRUCT: {},
+	NAMED_EXT:               {},
+}
+
+func IsPolymorphicType(typeID TypeId) bool {
+	_, exists := polymorphicTypes[typeID]
+	return exists
+}
 
 var namedTypes = map[TypeId]struct{}{
 	FORY_TYPE_TAG:           {},
