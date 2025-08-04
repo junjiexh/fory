@@ -30,6 +30,7 @@ func NewFory(referenceTracking bool) *Fory {
 		referenceTracking: referenceTracking,
 		language:          XLANG,
 		buffer:            NewByteBuffer(nil),
+		metaContext:       &MetaContext{typeInfos: make([]TypeInfo, 0)},
 	}
 	fory.typeResolver = newTypeResolver(fory)
 	return fory
@@ -103,6 +104,10 @@ const (
 
 const MAGIC_NUMBER int16 = 0x62D4
 
+type MetaContext struct {
+	typeInfos []TypeInfo
+}
+
 type Fory struct {
 	typeResolver      *typeResolver
 	refResolver       *RefResolver
@@ -112,6 +117,7 @@ type Fory struct {
 	peerLanguage      Language
 	buffer            *ByteBuffer
 	buffers           []*ByteBuffer
+	metaContext       *MetaContext
 }
 
 func (f *Fory) RegisterTagType(tag string, v interface{}) error {
@@ -474,6 +480,7 @@ func (f *Fory) Reset() {
 func (f *Fory) resetWrite() {
 	f.typeResolver.resetWrite()
 	f.refResolver.resetWrite()
+	f.metaContext.typeInfos = f.metaContext.typeInfos[:0]
 }
 
 func (f *Fory) resetRead() {
