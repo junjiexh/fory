@@ -432,6 +432,42 @@ func (r *typeResolver) RegisterTypeTag(value reflect.Value, tag string) error {
 	return nil
 }
 
+func (r *typeResolver) RegisterCompatibleTypeTag(value reflect.Value, tag string) error {
+	type_ := value.Type()
+	if prev, ok := r.typeToSerializers[type_]; ok {
+		return fmt.Errorf("type %s already has a serializer %s registered", type_, prev)
+	}
+
+	// Create compatible serializer instead of regular struct serializer
+	serializer := NewCompatibleSerializer(tag, type_)
+	r.typeToSerializers[type_] = serializer
+
+	// Register type info with compatible tag prefix
+	r.typeToTypeInfo[type_] = "@" + tag
+	r.typeInfoToType["@"+tag] = type_
+
+	ptrType := reflect.PtrTo(type_)
+	ptrValue := reflect.New(type_)
+	ptrSerializer := NewPtrToCompatibleStructSerializer(tag, ptrType)
+	r.typeToSerializers[ptrType] = ptrSerializer
+
+	// Use compatible pointer serializer as default deserializer
+	r.typeTagToSerializers[tag] = ptrSerializer
+	r.typeToTypeInfo[ptrType] = "*@" + tag
+	r.typeInfoToType["*@"+tag] = ptrType
+
+	// Register both value and pointer types in type system
+	info, err := r.getTypeInfo(value, true)
+	if err != nil {
+		return fmt.Errorf("failed to register compatible named structs: info is %v", info)
+	}
+	info, err = r.getTypeInfo(ptrValue, true)
+	if err != nil {
+		return fmt.Errorf("failed to register compatible named structs: info is %v", info)
+	}
+	return nil
+}
+
 func (r *typeResolver) RegisterExt(extId int16, type_ reflect.Type) error {
 	// Registering type is necessary, otherwise we may don't have the symbols of corresponding type when deserializing.
 	panic("not supported")

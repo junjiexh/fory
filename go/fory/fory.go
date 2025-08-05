@@ -30,7 +30,15 @@ func NewFory(referenceTracking bool) *Fory {
 		referenceTracking: referenceTracking,
 		language:          XLANG,
 		buffer:            NewByteBuffer(nil),
-		metaContext:       &MetaContext{typeInfos: make([]TypeInfo, 0)},
+		metaContext: &MetaContext{
+			typeInfos:        make([]TypeInfo, 0),
+			compatibleMode:   COMPATIBLE,
+			classMap:         make(map[reflect.Type]int32),
+			readClassDefs:    make(map[int32]*ClassDef),
+			readClassInfos:   make(map[int32]*ClassDef),
+			writingClassDefs: make([]*ClassDef, 0),
+			classIDCounter:   1,
+		},
 	}
 	fory.typeResolver = newTypeResolver(fory)
 	return fory
@@ -106,6 +114,14 @@ const MAGIC_NUMBER int16 = 0x62D4
 
 type MetaContext struct {
 	typeInfos []TypeInfo
+
+	// Compatibility support
+	compatibleMode   CompatibleMode
+	classMap         map[reflect.Type]int32 // Track shared classes
+	readClassDefs    map[int32]*ClassDef    // Received class definitions
+	readClassInfos   map[int32]*ClassDef    // Resolved class info
+	writingClassDefs []*ClassDef            // Pending class definitions
+	classIDCounter   int32                  // Counter for assigning class IDs
 }
 
 type Fory struct {
@@ -122,6 +138,10 @@ type Fory struct {
 
 func (f *Fory) RegisterTagType(tag string, v interface{}) error {
 	return f.typeResolver.RegisterTypeTag(reflect.ValueOf(v), tag)
+}
+
+func (f *Fory) RegisterCompatibleType(tag string, v interface{}) error {
+	return f.typeResolver.RegisterCompatibleTypeTag(reflect.ValueOf(v), tag)
 }
 
 func (f *Fory) Marshal(v interface{}) ([]byte, error) {
@@ -481,6 +501,7 @@ func (f *Fory) resetWrite() {
 	f.typeResolver.resetWrite()
 	f.refResolver.resetWrite()
 	f.metaContext.typeInfos = f.metaContext.typeInfos[:0]
+	f.metaContext.writingClassDefs = f.metaContext.writingClassDefs[:0]
 }
 
 func (f *Fory) resetRead() {
@@ -496,4 +517,43 @@ func (f *Fory) SetLanguage(language Language) {
 
 func (f *Fory) SetReferenceTracking(referenceTracking bool) {
 	f.referenceTracking = referenceTracking
+}
+
+func (f *Fory) SetCompatibleMode(mode CompatibleMode) {
+	f.metaContext.compatibleMode = mode
+}
+
+func (f *Fory) GetCompatibleMode() CompatibleMode {
+	return f.metaContext.compatibleMode
+}
+
+// MetaContext methods for compatibility management
+func (mc *MetaContext) GetClassID(t reflect.Type) (int32, bool) {
+	id, exists := mc.classMap[t]
+	return id, exists
+}
+
+func (mc *MetaContext) RegisterClass(t reflect.Type) int32 {
+	if id, exists := mc.classMap[t]; exists {
+		return id
+	}
+
+	id := mc.classIDCounter
+	mc.classIDCounter++
+	mc.classMap[t] = id
+	return id
+}
+
+func (mc *MetaContext) GetClassDef(classID int32) (*ClassDef, bool) {
+	def, exists := mc.readClassDefs[classID]
+	return def, exists
+}
+
+func (mc *MetaContext) SetClassDef(classID int32, def *ClassDef) {
+	mc.readClassDefs[classID] = def
+	mc.readClassInfos[classID] = def
+}
+
+func (mc *MetaContext) AddWritingClassDef(def *ClassDef) {
+	mc.writingClassDefs = append(mc.writingClassDefs, def)
 }

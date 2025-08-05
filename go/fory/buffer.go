@@ -736,3 +736,12 @@ func (b *ByteBuffer) ReadBytes(n int) []byte {
 	b.readerIndex += n
 	return p
 }
+
+// Skip advances the reader index by n bytes without reading the data
+func (b *ByteBuffer) Skip(n int) {
+	if b.readerIndex+n <= len(b.data) {
+		b.readerIndex += n
+	} else {
+		panic(fmt.Errorf("skip %d bytes would exceed buffer bounds", n))
+	}
+}
