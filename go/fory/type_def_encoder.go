@@ -150,7 +150,7 @@ func (e *TypeDefEncoder) createNestedTypeInfo(fieldType reflect.Type) *NestedTyp
 		elemType := GetTypeIdForGoType(fieldType.Elem())
 		return &NestedTypeInfo{
 			valueType:           elemType,
-			isValueNullable:     e.isTypeNullable(fieldType.Elem()),
+			isValueNullable:     nullable(fieldType.Elem()),
 			hasValueRefTracking: e.hasTypeRefTracking(fieldType.Elem()),
 		}
 	case reflect.Map:
@@ -159,23 +159,13 @@ func (e *TypeDefEncoder) createNestedTypeInfo(fieldType reflect.Type) *NestedTyp
 		return &NestedTypeInfo{
 			keyType:             keyType,
 			valueType:           valueType,
-			isKeyNullable:       e.isTypeNullable(fieldType.Key()),
-			isValueNullable:     e.isTypeNullable(fieldType.Elem()),
+			isKeyNullable:       nullable(fieldType.Key()),
+			isValueNullable:     nullable(fieldType.Elem()),
 			hasKeyRefTracking:   e.hasTypeRefTracking(fieldType.Key()),
 			hasValueRefTracking: e.hasTypeRefTracking(fieldType.Elem()),
 		}
 	default:
 		return nil
-	}
-}
-
-// isTypeNullable checks if a type is nullable
-func (e *TypeDefEncoder) isTypeNullable(goType reflect.Type) bool {
-	switch goType.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map:
-		return true
-	default:
-		return false
 	}
 }
 

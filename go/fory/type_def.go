@@ -157,8 +157,8 @@ func GetTypeIdForGoType(goType reflect.Type) TypeId {
 		// For pointers, get the type of the pointed-to element
 		return GetTypeIdForGoType(goType.Elem())
 	case reflect.Interface:
-		return FORY_TYPE_TAG
+		return UNKNOWN
 	default:
-		return FORY_TYPE_TAG // Unknown type
+		return UNKNOWN // Unknown type
 	}
 }
