@@ -27,6 +27,10 @@ import (
 	"github.com/apache/fory/go/fory/meta"
 )
 
+const (
+	NumFieldsThreshold = 31
+)
+
 // TypeDefEncoder encodes Go types into TypeDef format
 type TypeDefEncoder struct {
 	metaStringEncoder *meta.Encoder
@@ -275,23 +279,19 @@ func (e *TypeDefEncoder) writeMetaHeader(buffer *ByteBuffer, fieldInfos []FieldI
 	numFields := len(fieldInfos)
 
 	// Num fields (lower 5 bits)
-	if numFields < 31 {
+	if numFields < NumFieldsThreshold {
 		header |= uint8(numFields) & 0x1F
 	} else {
 		header |= 0x1F // Set to max value, actual count will follow
 	}
 
 	// Registration method (6th bit) - 0 for ID registration, 1 for name registration
-	// For now, assume name registration
 	header |= 1 << 5
-
-	// Reserved bits (7th and 8th bit) - leave as 0
 
 	buffer.WriteByte_(header)
 
-	// If num fields >= 31, write the additional count as varint
-	if numFields >= 31 {
-		buffer.WriteVarUint32(uint32(numFields - 31))
+	if numFields >= NumFieldsThreshold {
+		buffer.WriteVarInt32(int32(numFields - NumFieldsThreshold))
 	}
 
 	return nil
