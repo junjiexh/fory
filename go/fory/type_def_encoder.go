@@ -28,7 +28,11 @@ import (
 )
 
 const (
-	NumFieldsThreshold = 31
+	NumFieldsThreshold     = 31
+	FieldNameSizeThreshold = 15
+	MetaSizeThreshold      = 4095
+	COMPRESS_META_FLAG     = 0b1 << 13
+	HAS_FIELDS_META_FLAG   = 0b1 << 12
 )
 
 // TypeDefEncoder encodes Go types into TypeDef format
@@ -213,7 +217,6 @@ func (e *TypeDefEncoder) computeTypeHash(fieldInfos []FieldInfo) uint64 {
 func (e *TypeDefEncoder) encodeClassDef(typeDef *TypeDef) ([]byte, error) {
 	buffer := NewByteBuffer(nil)
 
-	// First, encode the metadata (header + fields)
 	metaBuffer := NewByteBuffer(nil)
 
 	// Write meta header
@@ -226,47 +229,51 @@ func (e *TypeDefEncoder) encodeClassDef(typeDef *TypeDef) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write fields info: %w", err)
 	}
 
-	metaData := metaBuffer.GetByteSlice(0, metaBuffer.WriterIndex())
-	metaSize := len(metaData)
-
-	// Write global binary header
-	if err := e.writeGlobalBinaryHeader(buffer, metaSize, typeDef.GetHash()); err != nil {
-		return nil, fmt.Errorf("failed to write global binary header: %w", err)
-	}
-
 	// Write metadata
 	buffer.WriteBinary(metaData)
+
+	// Write global binary header
+	if err := e.prependGlobalHeader(buffer, false, true); err != nil {
+		return nil, fmt.Errorf("failed to write global binary header: %w", err)
+	}
 
 	return buffer.GetByteSlice(0, buffer.WriterIndex()), nil
 }
 
-// writeGlobalBinaryHeader writes the 8-byte global binary header
-func (e *TypeDefEncoder) writeGlobalBinaryHeader(buffer *ByteBuffer, metaSize int, hash uint64) error {
+// prependGlobalHeader writes the 8-byte global binary header
+func (e *TypeDefEncoder) prependGlobalHeader(buffer *ByteBuffer, isCompressed bool, hasFieldsMeta bool) error {
 	var header uint64
 
+	metaData := buffer.GetByteSlice(0, buffer.WriterIndex())
+	metaSize := len(metaData)
+
 	// Meta size (12 bits, lower bits)
-	if metaSize < 4095 {
+	if metaSize < MetaSizeThreshold {
 		header |= uint64(metaSize) & 0xFFF
 	} else {
 		header |= 0xFFF // Set to max value, actual size will follow
 	}
 
 	// Write fields meta flag (13th bit) - always true for now
-	header |= 1 << 12
+	if hasFieldsMeta {
+		header |= HAS_FIELDS_META_FLAG
+	}
 
 	// Compress flag (14th bit) - false for now
-	// header |= 0 << 13
+	if isCompressed {
+		header |= COMPRESS_META_FLAG
+	}
 
-	// Hash (50 bits, upper bits)
-	hashValue := hash & 0x3FFFFFFFFFFFF // Mask to 50 bits
+	// Hash (50 bits, upper bits) fixme
+	hashValue := hash & 0x3FFFFFFFFFFFF
 	header |= hashValue << 14
 
 	// Write the 8-byte header in little endian
 	buffer.WriteInt64(int64(header))
 
 	// If meta size >= 4095, write the additional size as varint
-	if metaSize >= 4095 {
-		buffer.WriteVarUint32(uint32(metaSize - 4095))
+	if metaSize >= MetaSizeThreshold {
+		buffer.WriteVarUint32(uint32(metaSize - MetaSizeThreshold))
 	}
 
 	return nil
@@ -298,6 +305,9 @@ func (e *TypeDefEncoder) writeMetaHeader(buffer *ByteBuffer, fieldInfos []FieldI
 }
 
 // writeFieldsInfo writes field information according to the specification
+// |   field info: variable bytes    | variable bytes  | ... |
+// +---------------------------------+-----------------+-----+
+// | header + type info + field name | next field info | ... |
 func (e *TypeDefEncoder) writeFieldsInfo(buffer *ByteBuffer, fieldInfos []FieldInfo) error {
 	for _, field := range fieldInfos {
 		if err := e.writeFieldInfo(buffer, field); err != nil {
@@ -328,6 +338,7 @@ func (e *TypeDefEncoder) writeFieldInfo(buffer *ByteBuffer, field FieldInfo) err
 }
 
 // writeFieldHeader writes the 1-byte field header
+// 2 bits field name encoding + 4 bits size + nullability flag + ref tracking flag
 func (e *TypeDefEncoder) writeFieldHeader(buffer *ByteBuffer, field FieldInfo) error {
 	var header uint8
 
@@ -336,7 +347,7 @@ func (e *TypeDefEncoder) writeFieldHeader(buffer *ByteBuffer, field FieldInfo) e
 
 	// Size of field name (4 bits) - store length - 1 (0-14 range)
 	nameLen := len(field.name)
-	if nameLen < 15 {
+	if nameLen < FieldNameSizeThreshold {
 		header |= uint8((nameLen-1)&0x0F) << 2
 	} else {
 		header |= 0x0F << 2 // Max value, actual length will follow
@@ -355,8 +366,8 @@ func (e *TypeDefEncoder) writeFieldHeader(buffer *ByteBuffer, field FieldInfo) e
 	buffer.WriteByte_(header)
 
 	// Write extended length if needed
-	if nameLen >= 15 {
-		buffer.WriteVarUint32(uint32(nameLen - 15))
+	if nameLen >= FieldNameSizeThreshold {
+		buffer.WriteVarUint32(uint32(nameLen - FieldNameSizeThreshold))
 	}
 
 	return nil
