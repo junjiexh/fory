@@ -19,20 +19,21 @@ package fory
 
 import (
 	"fmt"
-	"hash/fnv"
 	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/apache/fory/go/fory/meta"
+	"github.com/spaolacci/murmur3"
 )
 
 const (
 	NumFieldsThreshold     = 31
 	FieldNameSizeThreshold = 15
-	MetaSizeThreshold      = 4095
+	META_SIZE_MASK         = 0xFFF
 	COMPRESS_META_FLAG     = 0b1 << 13
 	HAS_FIELDS_META_FLAG   = 0b1 << 12
+	NUM_HASH_BITS          = 50
 )
 
 // TypeDefEncoder encodes Go types into TypeDef format
@@ -60,10 +61,6 @@ func (e *TypeDefEncoder) BuildTypeDef(goType reflect.Type) (*TypeDef, error) {
 
 	typeDef := NewTypeDef()
 	typeDef.SetFieldInfos(fieldInfos)
-
-	// Compute hash based on field information
-	hash := e.computeTypeHash(fieldInfos)
-	typeDef.SetHash(hash)
 
 	// Encode the TypeDef into binary format
 	encoded, err := e.encodeClassDef(typeDef)
@@ -187,32 +184,6 @@ func (e *TypeDefEncoder) hasTypeRefTracking(goType reflect.Type) bool {
 	}
 }
 
-// computeTypeHash computes a hash value for field infos
-func (e *TypeDefEncoder) computeTypeHash(fieldInfos []FieldInfo) uint64 {
-	h := fnv.New64a()
-
-	// Hash the field count
-	h.Write([]byte{byte(len(fieldInfos))})
-
-	// Hash each field info
-	for _, field := range fieldInfos {
-		h.Write([]byte(field.name))
-		h.Write([]byte{byte(field.fieldType)})
-		if field.isNullable {
-			h.Write([]byte{1})
-		} else {
-			h.Write([]byte{0})
-		}
-		if field.hasRefTracking {
-			h.Write([]byte{1})
-		} else {
-			h.Write([]byte{0})
-		}
-	}
-
-	return h.Sum64()
-}
-
 // encodeClassDef encodes a TypeDef into binary format according to the specification
 func (e *TypeDefEncoder) encodeClassDef(typeDef *TypeDef) ([]byte, error) {
 	buffer := NewByteBuffer(nil)
@@ -229,54 +200,51 @@ func (e *TypeDefEncoder) encodeClassDef(typeDef *TypeDef) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write fields info: %w", err)
 	}
 
-	// Write metadata
-	buffer.WriteBinary(metaData)
-
 	// Write global binary header
-	if err := e.prependGlobalHeader(buffer, false, true); err != nil {
+	result, err := e.prependGlobalHeader(buffer, false, true)
+	if err != nil {
 		return nil, fmt.Errorf("failed to write global binary header: %w", err)
 	}
 
-	return buffer.GetByteSlice(0, buffer.WriterIndex()), nil
+	return result.GetByteSlice(0, result.WriterIndex()), nil
 }
 
-// prependGlobalHeader writes the 8-byte global binary header
-func (e *TypeDefEncoder) prependGlobalHeader(buffer *ByteBuffer, isCompressed bool, hasFieldsMeta bool) error {
+// prependGlobalHeader writes the 8-byte global header
+func (e *TypeDefEncoder) prependGlobalHeader(buffer *ByteBuffer, isCompressed bool, hasFieldsMeta bool) (*ByteBuffer, error) {
 	var header uint64
+	metaSize := buffer.WriterIndex()
 
-	metaData := buffer.GetByteSlice(0, buffer.WriterIndex())
-	metaSize := len(metaData)
+	// Hash (50 bits, upper bits)
+	hashValue := murmur3.Sum64WithSeed(buffer.GetByteSlice(0, metaSize), 47)
+	header |= hashValue << (64 - NUM_HASH_BITS)
+
+	// Write fields meta flag (13th bit)
+	if hasFieldsMeta {
+		header |= HAS_FIELDS_META_FLAG
+	}
+
+	// Compress flag (14th bit)
+	if isCompressed {
+		header |= COMPRESS_META_FLAG
+	}
 
 	// Meta size (12 bits, lower bits)
-	if metaSize < MetaSizeThreshold {
+	if metaSize < META_SIZE_MASK {
 		header |= uint64(metaSize) & 0xFFF
 	} else {
 		header |= 0xFFF // Set to max value, actual size will follow
 	}
 
-	// Write fields meta flag (13th bit) - always true for now
-	if hasFieldsMeta {
-		header |= HAS_FIELDS_META_FLAG
-	}
-
-	// Compress flag (14th bit) - false for now
-	if isCompressed {
-		header |= COMPRESS_META_FLAG
-	}
-
-	// Hash (50 bits, upper bits) fixme
-	hashValue := hash & 0x3FFFFFFFFFFFF
-	header |= hashValue << 14
-
-	// Write the 8-byte header in little endian
-	buffer.WriteInt64(int64(header))
+	result := NewByteBuffer(make([]byte, metaSize+8))
+	result.WriteInt64(int64(header))
 
 	// If meta size >= 4095, write the additional size as varint
-	if metaSize >= MetaSizeThreshold {
-		buffer.WriteVarUint32(uint32(metaSize - MetaSizeThreshold))
+	if metaSize >= META_SIZE_MASK {
+		result.WriteVarUint32(uint32(metaSize - META_SIZE_MASK))
 	}
+	result.WriteBinary(buffer.GetByteSlice(0, metaSize))
 
-	return nil
+	return result, nil
 }
 
 // writeMetaHeader writes the 1-byte meta header
@@ -378,7 +346,7 @@ func (e *TypeDefEncoder) writeFieldTypeInfo(buffer *ByteBuffer, field FieldInfo)
 	// Write base type ID
 	buffer.WriteByte_(byte(field.fieldType))
 
-	// Write nested type info for complex types
+	// Write nested type info for complex types // ??? 需要吗
 	if field.nestedTypeInfo != nil {
 		return e.writeNestedTypeInfo(buffer, field.fieldType, field.nestedTypeInfo)
 	}
