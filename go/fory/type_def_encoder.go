@@ -19,42 +19,27 @@ package fory
 
 import (
 	"fmt"
-	"reflect"
-	"sort"
-	"strings"
-
-	"github.com/apache/fory/go/fory/meta"
 	"github.com/spaolacci/murmur3"
+	"reflect"
 )
 
 const (
-	NumFieldsThreshold     = 31
-	FieldNameSizeThreshold = 15
-	META_SIZE_MASK         = 0xFFF
-	COMPRESS_META_FLAG     = 0b1 << 13
-	HAS_FIELDS_META_FLAG   = 0b1 << 12
-	NUM_HASH_BITS          = 50
+	SmallNumFieldsThreshold = 31
+	FieldNameSizeThreshold  = 15
+	META_SIZE_MASK          = 0xFFF
+	COMPRESS_META_FLAG      = 0b1 << 13
+	HAS_FIELDS_META_FLAG    = 0b1 << 12
+	NUM_HASH_BITS           = 50
+	REGISTER_BY_NAME_FLAG   = 0b1 << 5
 )
 
-// TypeDefEncoder encodes Go types into TypeDef format
-type TypeDefEncoder struct {
-	metaStringEncoder *meta.Encoder
-}
-
-// NewTypeDefEncoder creates a new TypeDefEncoder
-func NewTypeDefEncoder() *TypeDefEncoder {
-	return &TypeDefEncoder{
-		metaStringEncoder: meta.NewEncoder('$', '_'),
-	}
-}
-
 // BuildTypeDef converts a Go type into a TypeDef
-func (e *TypeDefEncoder) BuildTypeDef(goType reflect.Type) (*TypeDef, error) {
-	if goType.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("BuildTypeDef only supports struct types, got %v", goType.Kind())
+func BuildTypeDef(fory *Fory, value reflect.Value) (*TypeDef, error) {
+	if value.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("BuildTypeDef only supports struct types, got %v", value.Kind())
 	}
 
-	fieldInfos, err := e.extractFieldInfos(goType)
+	fieldInfos, err := extractFieldInfos(fory.typeResolver, fory.refResolver, value)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract field infos: %w", err)
 	}
@@ -63,7 +48,7 @@ func (e *TypeDefEncoder) BuildTypeDef(goType reflect.Type) (*TypeDef, error) {
 	typeDef.SetFieldInfos(fieldInfos)
 
 	// Encode the TypeDef into binary format
-	encoded, err := e.encodeClassDef(typeDef)
+	encoded, err := encodeTypeDef(fory.typeResolver, value, fieldInfos)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode class definition: %w", err)
 	}
@@ -72,136 +57,54 @@ func (e *TypeDefEncoder) BuildTypeDef(goType reflect.Type) (*TypeDef, error) {
 	return typeDef, nil
 }
 
-// extractFieldInfos extracts field information from a struct type
-func (e *TypeDefEncoder) extractFieldInfos(structType reflect.Type) ([]FieldInfo, error) {
+// extractFieldInfos extracts field information from a struct value
+func extractFieldInfos(typeResolver *typeResolver, refResolver *RefResolver, structValue reflect.Value) ([]FieldInfo, error) {
 	var fieldInfos []FieldInfo
 
-	for i := 0; i < structType.NumField(); i++ {
-		field := structType.Field(i)
+	typ := structValue.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		fieldValue := structValue.Field(i)
 
-		// Skip unexported fields
-		if !field.IsExported() {
-			continue
-		}
+		var fieldInfo FieldInfo
+		fieldType := fieldValue.Type()
+		fieldName := fieldType.Name()
 
-		fieldInfo, err := e.createFieldInfo(field)
+		nameEncoding := typeResolver.typeNameEncoder.ComputeEncoding(fieldName)
+		typeId, err := typeResolver.getTypeInfo(fieldValue, true)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create field info for field %s: %w", field.Name, err)
+			return nil, err
 		}
 
+		fieldInfo = FieldInfo{
+			name:         fieldName,
+			nameEncoding: nameEncoding,
+			typeId:       TypeId(typeId.TypeID),
+			isNullable:   nullable(fieldType),
+			refTracking:  refResolver.refTracking,
+		}
 		fieldInfos = append(fieldInfos, fieldInfo)
 	}
-
-	// Sort fields by name for consistent ordering
-	sort.Slice(fieldInfos, func(i, j int) bool {
-		return fieldInfos[i].name < fieldInfos[j].name
-	})
-
 	return fieldInfos, nil
 }
 
-// createFieldInfo creates a FieldInfo from a reflect.StructField
-func (e *TypeDefEncoder) createFieldInfo(field reflect.StructField) (FieldInfo, error) {
-	fieldName := field.Name
-
-	// Get field name encoding
-	nameEncoding := e.metaStringEncoder.ComputeEncoding(fieldName)
-
-	// Determine field type
-	fieldType := GetTypeIdForGoType(field.Type)
-
-	// Check nullable and reference tracking
-	isNullable := nullable(field.Type)
-	hasRefTracking := e.hasFieldRefTracking(field)
-
-	// Create nested type info for complex types
-	var nestedTypeInfo *NestedTypeInfo
-	if fieldType == LIST || fieldType == MAP || fieldType == SET {
-		nestedTypeInfo = e.createNestedTypeInfo(field.Type)
-	}
-
-	return FieldInfo{
-		name:           fieldName,
-		nameEncoding:   nameEncoding,
-		fieldType:      fieldType,
-		isNullable:     isNullable,
-		hasRefTracking: hasRefTracking,
-		nestedTypeInfo: nestedTypeInfo,
-	}, nil
-}
-
-// hasFieldRefTracking determines if a field has reference tracking enabled
-func (e *TypeDefEncoder) hasFieldRefTracking(field reflect.StructField) bool {
-	// Check for ref tracking tag
-	if tag, ok := field.Tag.Lookup("ref"); ok {
-		return tag == "true"
-	}
-
-	// Enable ref tracking for reference types by default
-	switch field.Type.Kind() {
-	case reflect.Ptr, reflect.Slice, reflect.Map, reflect.Interface:
-		return true
-	case reflect.Struct:
-		return true
-	default:
-		return false
-	}
-}
-
-// createNestedTypeInfo creates nested type information for collections
-func (e *TypeDefEncoder) createNestedTypeInfo(fieldType reflect.Type) *NestedTypeInfo {
-	switch fieldType.Kind() {
-	case reflect.Slice:
-		elemType := GetTypeIdForGoType(fieldType.Elem())
-		return &NestedTypeInfo{
-			valueType:           elemType,
-			isValueNullable:     nullable(fieldType.Elem()),
-			hasValueRefTracking: e.hasTypeRefTracking(fieldType.Elem()),
-		}
-	case reflect.Map:
-		keyType := GetTypeIdForGoType(fieldType.Key())
-		valueType := GetTypeIdForGoType(fieldType.Elem())
-		return &NestedTypeInfo{
-			keyType:             keyType,
-			valueType:           valueType,
-			isKeyNullable:       nullable(fieldType.Key()),
-			isValueNullable:     nullable(fieldType.Elem()),
-			hasKeyRefTracking:   e.hasTypeRefTracking(fieldType.Key()),
-			hasValueRefTracking: e.hasTypeRefTracking(fieldType.Elem()),
-		}
-	default:
-		return nil
-	}
-}
-
-// hasTypeRefTracking checks if a type should have reference tracking
-func (e *TypeDefEncoder) hasTypeRefTracking(goType reflect.Type) bool {
-	switch goType.Kind() {
-	case reflect.Ptr, reflect.Slice, reflect.Map, reflect.Interface, reflect.Struct:
-		return true
-	default:
-		return false
-	}
-}
-
-// encodeClassDef encodes a TypeDef into binary format according to the specification
-func (e *TypeDefEncoder) encodeClassDef(typeDef *TypeDef) ([]byte, error) {
+// encodeTypeDef encodes a TypeDef into binary format according to the specification
+func encodeTypeDef(typeResolver *typeResolver, value reflect.Value, fieldInfos []FieldInfo) ([]byte, error) {
 	buffer := NewByteBuffer(nil)
 
 	metaBuffer := NewByteBuffer(nil)
 
 	// Write meta header
-	if err := e.writeMetaHeader(metaBuffer, typeDef.GetFieldInfos()); err != nil {
+	if err := writeMetaHeader(typeResolver, metaBuffer, value, fieldInfos); err != nil {
 		return nil, fmt.Errorf("failed to write meta header: %w", err)
 	}
 
 	// Write fields info
-	if err := e.writeFieldsInfo(metaBuffer, typeDef.GetFieldInfos()); err != nil {
+	if err := writeFieldsInfo(typeResolver, metaBuffer, fieldInfos); err != nil {
 		return nil, fmt.Errorf("failed to write fields info: %w", err)
 	}
 
 	// Write global binary header
-	result, err := e.prependGlobalHeader(buffer, false, true)
+	result, err := prependGlobalHeader(buffer, false, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write global binary header: %w", err)
 	}
@@ -210,7 +113,7 @@ func (e *TypeDefEncoder) encodeClassDef(typeDef *TypeDef) ([]byte, error) {
 }
 
 // prependGlobalHeader writes the 8-byte global header
-func (e *TypeDefEncoder) prependGlobalHeader(buffer *ByteBuffer, isCompressed bool, hasFieldsMeta bool) (*ByteBuffer, error) {
+func prependGlobalHeader(buffer *ByteBuffer, isCompressed bool, hasFieldsMeta bool) (*ByteBuffer, error) {
 	var header uint64
 	metaSize := buffer.WriterIndex()
 
@@ -248,27 +151,35 @@ func (e *TypeDefEncoder) prependGlobalHeader(buffer *ByteBuffer, isCompressed bo
 }
 
 // writeMetaHeader writes the 1-byte meta header
-func (e *TypeDefEncoder) writeMetaHeader(buffer *ByteBuffer, fieldInfos []FieldInfo) error {
-	var header uint8
+func writeMetaHeader(typeResolver *typeResolver, buffer *ByteBuffer, value reflect.Value, fieldInfos []FieldInfo) error {
+	offset := buffer.writerIndex
+	if err := buffer.WriteByte(0xFF); err != nil {
+		return err
+	}
+	header := len(fieldInfos)
+	if header > SmallNumFieldsThreshold {
+		header = SmallNumFieldsThreshold
+		buffer.WriteVarUint32(uint32(len(fieldInfos) - SmallNumFieldsThreshold))
+	}
 
-	numFields := len(fieldInfos)
+	info, err := typeResolver.getTypeInfo(value, true)
+	if err != nil {
+		return fmt.Errorf("failed to get type info for value %v: %w", value, err)
+	}
 
-	// Num fields (lower 5 bits)
-	if numFields < NumFieldsThreshold {
-		header |= uint8(numFields) & 0x1F
+	if !IsNamespacedType(TypeId(info.TypeID)) {
+		buffer.WriteVarUint32(uint32(info.TypeID))
 	} else {
-		header |= 0x1F // Set to max value, actual count will follow
+		header |= REGISTER_BY_NAME_FLAG
+		if err := typeResolver.metaStringResolver.WriteMetaStringBytes(buffer, info.PkgPathBytes); err != nil {
+			return err
+		}
+		if err := typeResolver.metaStringResolver.WriteMetaStringBytes(buffer, info.NameBytes); err != nil {
+			return err
+		}
 	}
 
-	// Registration method (6th bit) - 0 for ID registration, 1 for name registration
-	header |= 1 << 5
-
-	buffer.WriteByte_(header)
-
-	if numFields >= NumFieldsThreshold {
-		buffer.WriteVarInt32(int32(numFields - NumFieldsThreshold))
-	}
-
+	buffer.PutUint8(offset, uint8(header))
 	return nil
 }
 
@@ -276,9 +187,9 @@ func (e *TypeDefEncoder) writeMetaHeader(buffer *ByteBuffer, fieldInfos []FieldI
 // |   field info: variable bytes    | variable bytes  | ... |
 // +---------------------------------+-----------------+-----+
 // | header + type info + field name | next field info | ... |
-func (e *TypeDefEncoder) writeFieldsInfo(buffer *ByteBuffer, fieldInfos []FieldInfo) error {
+func writeFieldsInfo(typeResolver *typeResolver, buffer *ByteBuffer, fieldInfos []FieldInfo) error {
 	for _, field := range fieldInfos {
-		if err := e.writeFieldInfo(buffer, field); err != nil {
+		if err := writeFieldInfo(typeResolver, buffer, field); err != nil {
 			return fmt.Errorf("failed to write field info for field %s: %w", field.name, err)
 		}
 	}
@@ -286,258 +197,34 @@ func (e *TypeDefEncoder) writeFieldsInfo(buffer *ByteBuffer, fieldInfos []FieldI
 }
 
 // writeFieldInfo writes a single field's information
-func (e *TypeDefEncoder) writeFieldInfo(buffer *ByteBuffer, field FieldInfo) error {
+func writeFieldInfo(typeResolver *typeResolver, buffer *ByteBuffer, field FieldInfo) error {
 	// Write field header
-	if err := e.writeFieldHeader(buffer, field); err != nil {
-		return fmt.Errorf("failed to write field header: %w", err)
+	// 2 bits field name encoding + 4 bits size + nullability flag + ref tracking flag
+	offset := buffer.writerIndex
+	if err := buffer.WriteByte(0xFF); err != nil {
+		return err
 	}
-
-	// Write field type info
-	if err := e.writeFieldTypeInfo(buffer, field); err != nil {
-		return fmt.Errorf("failed to write field type info: %w", err)
-	}
-
-	// Write field name
-	if err := e.writeFieldName(buffer, field); err != nil {
-		return fmt.Errorf("failed to write field name: %w", err)
-	}
-
-	return nil
-}
-
-// writeFieldHeader writes the 1-byte field header
-// 2 bits field name encoding + 4 bits size + nullability flag + ref tracking flag
-func (e *TypeDefEncoder) writeFieldHeader(buffer *ByteBuffer, field FieldInfo) error {
 	var header uint8
-
-	// Field name encoding (2 bits)
+	if field.refTracking {
+		header = 1
+	}
+	if field.isNullable {
+		header |= 0b10
+	}
 	header |= uint8(field.nameEncoding) & 0x03
-
-	// Size of field name (4 bits) - store length - 1 (0-14 range)
-	nameLen := len(field.name)
+	metaString, err := typeResolver.typeNameEncoder.Encode(field.name)
+	if err != nil {
+		return err
+	}
+	nameLen := len(metaString.GetEncodedBytes())
 	if nameLen < FieldNameSizeThreshold {
 		header |= uint8((nameLen-1)&0x0F) << 2
 	} else {
 		header |= 0x0F << 2 // Max value, actual length will follow
-	}
-
-	// Nullability flag (7th bit)
-	if field.isNullable {
-		header |= 1 << 6
-	}
-
-	// Reference tracking flag (8th bit)
-	if field.hasRefTracking {
-		header |= 1 << 7
-	}
-
-	buffer.WriteByte_(header)
-
-	// Write extended length if needed
-	if nameLen >= FieldNameSizeThreshold {
 		buffer.WriteVarUint32(uint32(nameLen - FieldNameSizeThreshold))
 	}
-
+	buffer.PutUint8(offset, header)
+	// Write field type ID
+	buffer.WriteVarUint32Small7(uint32(field.typeId))
 	return nil
-}
-
-// writeFieldTypeInfo writes field type information
-func (e *TypeDefEncoder) writeFieldTypeInfo(buffer *ByteBuffer, field FieldInfo) error {
-	// Write base type ID
-	buffer.WriteByte_(byte(field.fieldType))
-
-	// Write nested type info for complex types // ??? 需要吗
-	if field.nestedTypeInfo != nil {
-		return e.writeNestedTypeInfo(buffer, field.fieldType, field.nestedTypeInfo)
-	}
-
-	return nil
-}
-
-// writeNestedTypeInfo writes nested type information for collections
-func (e *TypeDefEncoder) writeNestedTypeInfo(buffer *ByteBuffer, parentType TypeId, nested *NestedTypeInfo) error {
-	switch parentType {
-	case LIST, SET:
-		// Format: | nested type ID << 2 + nullable flag + ref tracking flag |
-		var typeInfo uint8 = uint8(nested.valueType) << 2
-		if nested.isValueNullable {
-			typeInfo |= 1
-		}
-		if nested.hasValueRefTracking {
-			typeInfo |= 2
-		}
-		buffer.WriteByte_(typeInfo)
-
-	case MAP:
-		// Format: | key type info | value type info |
-		// Key type info
-		var keyTypeInfo uint8 = uint8(nested.keyType) << 2
-		if nested.isKeyNullable {
-			keyTypeInfo |= 1
-		}
-		if nested.hasKeyRefTracking {
-			keyTypeInfo |= 2
-		}
-		buffer.WriteByte_(keyTypeInfo)
-
-		// Value type info
-		var valueTypeInfo uint8 = uint8(nested.valueType) << 2
-		if nested.isValueNullable {
-			valueTypeInfo |= 1
-		}
-		if nested.hasValueRefTracking {
-			valueTypeInfo |= 2
-		}
-		buffer.WriteByte_(valueTypeInfo)
-	}
-
-	return nil
-}
-
-// writeFieldName writes the field name using meta string encoding
-func (e *TypeDefEncoder) writeFieldName(buffer *ByteBuffer, field FieldInfo) error {
-	// Encode field name using meta string encoder
-	metaStr, err := e.metaStringEncoder.Encode(field.name)
-	if err != nil {
-		return fmt.Errorf("failed to encode field name %s: %w", field.name, err)
-	}
-
-	// Write the encoded bytes
-	encodedBytes := metaStr.GetEncodedBytes()
-	if encodedBytes != nil {
-		buffer.WriteBinary(encodedBytes)
-	} else {
-		// Empty field name case
-		buffer.WriteBinary([]byte(field.name))
-	}
-
-	return nil
-}
-
-// GetFieldNamesByEncoding returns field names grouped by encoding type
-func (e *TypeDefEncoder) GetFieldNamesByEncoding(fieldInfos []FieldInfo) map[meta.Encoding][]string {
-	result := make(map[meta.Encoding][]string)
-
-	for _, field := range fieldInfos {
-		encoding := field.nameEncoding
-		if _, exists := result[encoding]; !exists {
-			result[encoding] = make([]string, 0)
-		}
-		result[encoding] = append(result[encoding], field.name)
-	}
-
-	return result
-}
-
-// ValidateTypeDef validates that a TypeDef is well-formed
-func (e *TypeDefEncoder) ValidateTypeDef(typeDef *TypeDef) error {
-	if typeDef == nil {
-		return fmt.Errorf("TypeDef cannot be nil")
-	}
-
-	fieldInfos := typeDef.GetFieldInfos()
-	if len(fieldInfos) == 0 {
-		return fmt.Errorf("TypeDef must have at least one field")
-	}
-
-	// Check for duplicate field names
-	nameMap := make(map[string]bool)
-	for _, field := range fieldInfos {
-		if field.name == "" {
-			return fmt.Errorf("field name cannot be empty")
-		}
-		if nameMap[field.name] {
-			return fmt.Errorf("duplicate field name: %s", field.name)
-		}
-		nameMap[field.name] = true
-
-		// Validate field type
-		if field.fieldType < 0 {
-			return fmt.Errorf("invalid field type ID: %d", field.fieldType)
-		}
-	}
-
-	return nil
-}
-
-// GetTypeDefStats returns statistics about a TypeDef
-func (e *TypeDefEncoder) GetTypeDefStats(typeDef *TypeDef) map[string]interface{} {
-	stats := make(map[string]interface{})
-
-	fieldInfos := typeDef.GetFieldInfos()
-	stats["fieldCount"] = len(fieldInfos)
-	stats["encodedSize"] = len(typeDef.GetEncoded())
-	stats["hash"] = fmt.Sprintf("0x%x", typeDef.GetHash())
-
-	// Count fields by type
-	typeCounts := make(map[TypeId]int)
-	nullableCount := 0
-	refTrackingCount := 0
-
-	for _, field := range fieldInfos {
-		typeCounts[field.fieldType]++
-		if field.isNullable {
-			nullableCount++
-		}
-		if field.hasRefTracking {
-			refTrackingCount++
-		}
-	}
-
-	stats["typeDistribution"] = typeCounts
-	stats["nullableFieldCount"] = nullableCount
-	stats["refTrackingFieldCount"] = refTrackingCount
-
-	// Encoding statistics
-	encodingCounts := e.GetFieldNamesByEncoding(fieldInfos)
-	encodingStats := make(map[string]int)
-	for encoding, names := range encodingCounts {
-		var encodingName string
-		switch encoding {
-		case meta.UTF_8:
-			encodingName = "UTF8"
-		case meta.ALL_TO_LOWER_SPECIAL:
-			encodingName = "ALL_TO_LOWER_SPECIAL"
-		case meta.LOWER_UPPER_DIGIT_SPECIAL:
-			encodingName = "LOWER_UPPER_DIGIT_SPECIAL"
-		case meta.LOWER_SPECIAL:
-			encodingName = "LOWER_SPECIAL"
-		case meta.FIRST_TO_LOWER_SPECIAL:
-			encodingName = "FIRST_TO_LOWER_SPECIAL"
-		default:
-			encodingName = fmt.Sprintf("UNKNOWN_%d", encoding)
-		}
-		encodingStats[encodingName] = len(names)
-	}
-	stats["encodingDistribution"] = encodingStats
-
-	return stats
-}
-
-// DebugTypeDef returns a human-readable representation of a TypeDef
-func (e *TypeDefEncoder) DebugTypeDef(typeDef *TypeDef) string {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("TypeDef(hash=0x%x, encodedSize=%d)\n",
-		typeDef.GetHash(), len(typeDef.GetEncoded())))
-
-	fieldInfos := typeDef.GetFieldInfos()
-	sb.WriteString(fmt.Sprintf("Fields(%d):\n", len(fieldInfos)))
-
-	for i, field := range fieldInfos {
-		sb.WriteString(fmt.Sprintf("  [%d] %s: type=%d", i, field.name, field.fieldType))
-		if field.isNullable {
-			sb.WriteString(" nullable")
-		}
-		if field.hasRefTracking {
-			sb.WriteString(" refTracking")
-		}
-		if field.nestedTypeInfo != nil {
-			sb.WriteString(fmt.Sprintf(" nested(key=%d,val=%d)",
-				field.nestedTypeInfo.keyType, field.nestedTypeInfo.valueType))
-		}
-		sb.WriteString("\n")
-	}
-
-	return sb.String()
 }
