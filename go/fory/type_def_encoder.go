@@ -19,8 +19,9 @@ package fory
 
 import (
 	"fmt"
-	"github.com/spaolacci/murmur3"
 	"reflect"
+
+	"github.com/spaolacci/murmur3"
 )
 
 const (
@@ -63,11 +64,12 @@ func extractFieldInfos(typeResolver *typeResolver, refResolver *RefResolver, str
 
 	typ := structValue.Type()
 	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
 		fieldValue := structValue.Field(i)
 
 		var fieldInfo FieldInfo
 		fieldType := fieldValue.Type()
-		fieldName := fieldType.Name()
+		fieldName := field.Name
 
 		nameEncoding := typeResolver.typeNameEncoder.ComputeEncoding(fieldName)
 		typeId, err := typeResolver.getTypeInfo(fieldValue, true)
