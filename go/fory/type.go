@@ -19,13 +19,14 @@ package fory
 
 import (
 	"fmt"
-	"github.com/apache/fory/go/fory/meta"
 	"hash/fnv"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/apache/fory/go/fory/meta"
 )
 
 type TypeId = int16
@@ -262,6 +263,7 @@ type typeResolver struct {
 	language            Language
 	metaStringResolver  *MetaStringResolver
 	requireRegistration bool
+	shareMeta           bool
 
 	// String mappings
 	metaStrToStr     map[string]string
@@ -682,7 +684,7 @@ func calcTypeHash(typ reflect.Type) uint64 {
 	return h.Sum64()
 }
 
-func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo) error {
+func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo, value reflect.Value) error {
 	// Extract the internal type ID (lower 8 bits)
 	typeID := typeInfo.TypeID
 	internalTypeID := typeID
@@ -695,6 +697,10 @@ func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo) erro
 
 	// For namespaced types, write additional metadata:
 	if IsNamespacedType(TypeId(internalTypeID)) {
+		if r.shareMeta {
+			writeTypeMeta(buffer, typeInfo, value)
+		}
+
 		// Write package path (namespace) metadata
 		if err := r.metaStringResolver.WriteMetaStringBytes(buffer, typeInfo.PkgPathBytes); err != nil {
 			return err
@@ -706,6 +712,11 @@ func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo) erro
 	}
 
 	return nil
+}
+
+func writeTypeMeta(buffer *ByteBuffer, typeInfo TypeInfo, value reflect.Value) {
+	// todo
+	panic("unimplemented")
 }
 
 func (r *typeResolver) createSerializer(type_ reflect.Type, mapInStruct bool) (s Serializer, err error) {

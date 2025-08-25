@@ -300,7 +300,7 @@ func (f *Fory) writeValue(buffer *ByteBuffer, value reflect.Value, serializer Se
 	if err != nil {
 		return fmt.Errorf("cannot get typeinfo for value %v: %v", value, err)
 	}
-	err = f.typeResolver.writeTypeInfo(buffer, typeInfo)
+	err = f.typeResolver.writeTypeInfo(buffer, typeInfo, value)
 	if err != nil {
 		return fmt.Errorf("cannot write typeinfo for value %v: %v", value, err)
 	}
