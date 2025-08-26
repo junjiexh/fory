@@ -30,8 +30,8 @@ const (
 	FieldNameSizeThreshold  = 15
 )
 
-// BuildTypeDef converts a Go type into a TypeDef
-func BuildTypeDef(fory *Fory, value reflect.Value) (*TypeDef, error) {
+// buildTypeDef converts a Go type into a TypeDef
+func buildTypeDef(fory *Fory, value reflect.Value) (*TypeDef, error) {
 	if value.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("BuildTypeDef only supports struct types, got %v", value.Kind())
 	}
@@ -42,14 +42,14 @@ func BuildTypeDef(fory *Fory, value reflect.Value) (*TypeDef, error) {
 	}
 
 	typeDef := NewTypeDef()
-	typeDef.SetFieldInfos(fieldInfos)
+	typeDef.fieldInfos = fieldInfos
 
 	encoded, err := encodeTypeDef(fory.typeResolver, value, fieldInfos)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode class definition: %w", err)
 	}
 
-	typeDef.SetEncoded(encoded)
+	typeDef.encoded = encoded
 	return typeDef, nil
 }
 

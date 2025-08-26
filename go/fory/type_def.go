@@ -53,34 +53,18 @@ func NewTypeDef() *TypeDef {
 	}
 }
 
-// GetFieldInfos returns the field information
-func (td *TypeDef) GetFieldInfos() []FieldInfo {
-	return td.fieldInfos
-}
-
-// GetEncoded returns the encoded bytes
-func (td *TypeDef) GetEncoded() []byte {
-	return td.encoded
-}
-
-// SetFieldInfos sets the field information
-func (td *TypeDef) SetFieldInfos(fieldInfos []FieldInfo) {
-	td.fieldInfos = fieldInfos
-}
-
-// SetEncoded sets the encoded bytes
-func (td *TypeDef) SetEncoded(encoded []byte) {
-	td.encoded = encoded
-}
-
 func (td *TypeDef) writeTypeDef(buffer *ByteBuffer) {
 	buffer.WriteBinary(td.encoded)
 }
 
-func SkipTypeDef(buffer *ByteBuffer, id int64) {
-	sz := int(id & META_SIZE_MASK)
+func skipTypeDef(buffer *ByteBuffer, header int64) {
+	sz := int(header & META_SIZE_MASK)
 	if sz == META_SIZE_MASK {
 		sz += int(buffer.ReadVarUint32())
 	}
 	buffer.IncreaseReaderIndex(sz)
+}
+
+func readTypeDefs(fory *Fory, buffer *ByteBuffer) (*TypeDef, error) {
+	return decodeTypeDef(*fory.typeResolver, buffer, buffer.ReadInt64())
 }

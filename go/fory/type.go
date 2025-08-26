@@ -288,8 +288,9 @@ type typeResolver struct {
 	typeNameDecoder  *meta.Decoder
 
 	// meta share related
-	shareMeta     bool
-	typeToTypeDef map[reflect.Type]*TypeDef
+	shareMeta       bool
+	typeToTypeDef   map[reflect.Type]*TypeDef
+	metaIdToTypeDef map[int64]*TypeDef
 }
 
 func newTypeResolver(fory *Fory) *typeResolver {
@@ -326,8 +327,9 @@ func newTypeResolver(fory *Fory) *typeResolver {
 		typeNameEncoder:  meta.NewEncoder('$', '_'),
 		typeNameDecoder:  meta.NewDecoder('$', '_'),
 
-		shareMeta:     fory.shareMeta,
-		typeToTypeDef: make(map[reflect.Type]*TypeDef),
+		shareMeta:       fory.shareMeta,
+		typeToTypeDef:   make(map[reflect.Type]*TypeDef),
+		metaIdToTypeDef: make(map[int64]*TypeDef),
 	}
 	// base type info for encode/decode types.
 	// composite types info will be constructed dynamically.
@@ -1055,7 +1057,7 @@ func (r *typeResolver) getOrCreateTypeDef(typ reflect.Type, value reflect.Value)
 		return existingTypeDef, nil
 	}
 
-	typeDef, err := BuildTypeDef(r.fory, value)
+	typeDef, err := buildTypeDef(r.fory, value)
 	if err != nil {
 		return nil, err
 	}
@@ -1079,12 +1081,26 @@ func (r *typeResolver) writeTypeDefs(buffer *ByteBuffer) {
 	context.writingTypeDefs = nil
 }
 
-func (r *typeResolver) readTypeDefs(buffer *ByteBuffer) {
+func (r *typeResolver) readTypeDefs(buffer *ByteBuffer) error {
 	numTypeDefs := buffer.ReadVarUint32()
+	context := r.fory.metaContext
 	for i := uint32(0); i < numTypeDefs; i++ {
 		id := buffer.ReadInt64()
-		SkipTypeDef(buffer, id)
+		var td *TypeDef
+		if existingTd, exists := r.metaIdToTypeDef[id]; exists {
+			skipTypeDef(buffer, id)
+			td = existingTd
+		} else {
+			newTd, err := readTypeDefs(r.fory, buffer)
+			if err != nil {
+				return err
+			}
+			r.metaIdToTypeDef[id] = newTd
+			td = newTd
+		}
+		context.readTypeDefs = append(context.readTypeDefs, td)
 	}
+	return nil
 }
 
 // TypeUnregisteredError indicates when a requested type is not registered
