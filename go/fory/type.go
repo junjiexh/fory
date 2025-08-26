@@ -263,7 +263,6 @@ type typeResolver struct {
 	language            Language
 	metaStringResolver  *MetaStringResolver
 	requireRegistration bool
-	shareMeta           bool
 
 	// String mappings
 	metaStrToStr     map[string]string
@@ -287,6 +286,10 @@ type typeResolver struct {
 	namespaceDecoder *meta.Decoder
 	typeNameEncoder  *meta.Encoder
 	typeNameDecoder  *meta.Decoder
+
+	// meta share related
+	shareMeta     bool
+	typeToTypeDef map[reflect.Type]*TypeDef
 }
 
 func newTypeResolver(fory *Fory) *typeResolver {
@@ -322,6 +325,9 @@ func newTypeResolver(fory *Fory) *typeResolver {
 		namespaceDecoder: meta.NewDecoder('.', '_'),
 		typeNameEncoder:  meta.NewEncoder('$', '_'),
 		typeNameDecoder:  meta.NewDecoder('$', '_'),
+
+		shareMeta:     fory.shareMeta,
+		typeToTypeDef: make(map[reflect.Type]*TypeDef),
 	}
 	// base type info for encode/decode types.
 	// composite types info will be constructed dynamically.
@@ -698,7 +704,10 @@ func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo, valu
 	// For namespaced types, write additional metadata:
 	if IsNamespacedType(TypeId(internalTypeID)) {
 		if r.shareMeta {
-			writeTypeMeta(buffer, typeInfo, value)
+			if err := r.writeSharedTypeMeta(buffer, typeInfo, value); err != nil {
+				return err
+			}
+			return nil
 		}
 
 		// Write package path (namespace) metadata
@@ -712,11 +721,6 @@ func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo, valu
 	}
 
 	return nil
-}
-
-func writeTypeMeta(buffer *ByteBuffer, typeInfo TypeInfo, value reflect.Value) {
-	// todo
-	panic("unimplemented")
 }
 
 func (r *typeResolver) createSerializer(type_ reflect.Type, mapInStruct bool) (s Serializer, err error) {
@@ -953,6 +957,10 @@ func (r *typeResolver) readTypeInfo(buffer *ByteBuffer) (TypeInfo, error) {
 		internalTypeID = -internalTypeID
 	}
 	if IsNamespacedType(TypeId(internalTypeID)) {
+		if r.shareMeta {
+			return r.readSharedTypeMeta(buffer)
+		}
+
 		// Read namespace and type name metadata bytes
 		nsBytes, err := r.metaStringResolver.ReadMetaStringBytes(buffer)
 		if err != nil {
@@ -1019,6 +1027,64 @@ func (r *typeResolver) readTypeInfo(buffer *ByteBuffer) (TypeInfo, error) {
 	}
 
 	return TypeInfo{}, nil
+}
+
+func (r *typeResolver) writeSharedTypeMeta(buffer *ByteBuffer, typeInfo TypeInfo, value reflect.Value) error {
+	context := r.fory.metaContext
+	typ := value.Type()
+
+	if index, exists := context.typeMap[typ]; exists {
+		buffer.WriteVarUint32(index)
+		return nil
+	}
+
+	newIndex := uint32(len(context.typeMap))
+	buffer.WriteVarUint32(newIndex)
+	context.typeMap[typ] = newIndex
+
+	typeDef, err := r.getOrCreateTypeDef(typeInfo.Type, value)
+	if err != nil {
+		return err
+	}
+	context.writingTypeDefs = append(context.writingTypeDefs, typeDef)
+	return nil
+}
+
+func (r *typeResolver) getOrCreateTypeDef(typ reflect.Type, value reflect.Value) (*TypeDef, error) {
+	if existingTypeDef, exists := r.typeToTypeDef[typ]; exists {
+		return existingTypeDef, nil
+	}
+
+	typeDef, err := BuildTypeDef(r.fory, value)
+	if err != nil {
+		return nil, err
+	}
+	r.typeToTypeDef[typ] = typeDef
+	return typeDef, nil
+}
+
+func (r *typeResolver) readSharedTypeMeta(buffer *ByteBuffer) (TypeInfo, error) {
+	context := r.fory.metaContext
+	index := buffer.ReadVarInt32() // shared meta index id
+	return context.readTypeInfos[index], nil
+}
+
+func (r *typeResolver) writeTypeDefs(buffer *ByteBuffer) {
+	context := r.fory.metaContext
+	sz := len(context.writingTypeDefs)
+	buffer.WriteVarUint32(uint32(sz))
+	for _, typeDef := range context.writingTypeDefs {
+		typeDef.writeTypeDef(buffer)
+	}
+	context.writingTypeDefs = nil
+}
+
+func (r *typeResolver) readTypeDefs(buffer *ByteBuffer) {
+	numTypeDefs := buffer.ReadVarUint32()
+	for i := uint32(0); i < numTypeDefs; i++ {
+		id := buffer.ReadInt64()
+		SkipTypeDef(buffer, id)
+	}
 }
 
 // TypeUnregisteredError indicates when a requested type is not registered

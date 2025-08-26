@@ -21,6 +21,13 @@ import (
 	"github.com/apache/fory/go/fory/meta"
 )
 
+const (
+	META_SIZE_MASK       = 0xFFF
+	COMPRESS_META_FLAG   = 0b1 << 13
+	HAS_FIELDS_META_FLAG = 0b1 << 12
+	NUM_HASH_BITS        = 50
+)
+
 // TypeDef represents a transportable value object containing class structure information
 type TypeDef struct {
 	fieldInfos []FieldInfo
@@ -64,4 +71,16 @@ func (td *TypeDef) SetFieldInfos(fieldInfos []FieldInfo) {
 // SetEncoded sets the encoded bytes
 func (td *TypeDef) SetEncoded(encoded []byte) {
 	td.encoded = encoded
+}
+
+func (td *TypeDef) writeTypeDef(buffer *ByteBuffer) {
+	buffer.WriteBinary(td.encoded)
+}
+
+func SkipTypeDef(buffer *ByteBuffer, id int64) {
+	sz := int(id & META_SIZE_MASK)
+	if sz == META_SIZE_MASK {
+		sz += int(buffer.ReadVarUint32())
+	}
+	buffer.IncreaseReaderIndex(sz)
 }

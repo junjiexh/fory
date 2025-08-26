@@ -30,10 +30,27 @@ func NewFory(referenceTracking bool) *Fory {
 		referenceTracking: referenceTracking,
 		language:          XLANG,
 		buffer:            NewByteBuffer(nil),
-		metaContext:       &MetaContext{typeInfos: make([]TypeInfo, 0)},
+		shareMeta:         false,
 	}
 	fory.typeResolver = newTypeResolver(fory)
 	return fory
+}
+
+// MetaContext used to share data across multiple serialization calls
+type MetaContext struct {
+	// typeMap make sure each type just fully serialize once, the following serialization will use the index
+	typeMap map[reflect.Type]uint32
+	// record typeDefs need to be serialized during one serialization
+	writingTypeDefs []*TypeDef
+	// read from peer
+	readTypeDefs  []*TypeDef
+	readTypeInfos []TypeInfo
+}
+
+func NewMetaContext() *MetaContext {
+	return &MetaContext{
+		typeMap: make(map[reflect.Type]uint32),
+	}
 }
 
 var foryPool = sync.Pool{
@@ -104,10 +121,6 @@ const (
 
 const MAGIC_NUMBER int16 = 0x62D4
 
-type MetaContext struct {
-	typeInfos []TypeInfo
-}
-
 type Fory struct {
 	typeResolver      *typeResolver
 	refResolver       *RefResolver
@@ -118,6 +131,14 @@ type Fory struct {
 	buffer            *ByteBuffer
 	buffers           []*ByteBuffer
 	metaContext       *MetaContext
+	shareMeta         bool
+}
+
+// Set meta context, which can be used to share data across multiple serialization call. Note that
+// code metaContext will be cleared after the serialization is finished. Please set the context
+// before every serialization if metaShare is enabled
+func (f *Fory) SetMetaContext(metaContext *MetaContext) {
+	f.metaContext = metaContext
 }
 
 func (f *Fory) RegisterTagType(tag string, v interface{}) error {
@@ -251,7 +272,17 @@ func (f *Fory) readLength(buffer *ByteBuffer) int {
 }
 
 func (f *Fory) WriteReferencable(buffer *ByteBuffer, value reflect.Value) error {
-	return f.writeReferencableBySerializer(buffer, value, nil)
+	metaOffset := buffer.writerIndex
+	if f.shareMeta {
+		buffer.WriteInt32(-1)
+	}
+	if err := f.writeReferencableBySerializer(buffer, value, nil); err != nil {
+		return err
+	}
+	if f.shareMeta && len(f.metaContext.writingTypeDefs) > 0 {
+		buffer.PutInt32(metaOffset, int32(buffer.writerIndex-metaOffset-4))
+	}
+	return nil
 }
 
 func (f *Fory) writeReferencableBySerializer(buffer *ByteBuffer, value reflect.Value, serializer Serializer) error {
@@ -372,6 +403,10 @@ func (f *Fory) Deserialize(buf *ByteBuffer, v interface{}, buffers []*ByteBuffer
 				"produced with buffer_callback null")
 		}
 	}
+	if f.shareMeta {
+
+	}
+
 	if isXLangFlag {
 		return f.ReadReferencable(buf, reflect.ValueOf(v).Elem())
 	} else {
@@ -480,12 +515,13 @@ func (f *Fory) Reset() {
 func (f *Fory) resetWrite() {
 	f.typeResolver.resetWrite()
 	f.refResolver.resetWrite()
-	f.metaContext.typeInfos = f.metaContext.typeInfos[:0]
+	f.metaContext = nil
 }
 
 func (f *Fory) resetRead() {
 	f.typeResolver.resetRead()
 	f.refResolver.resetRead()
+	f.metaContext = nil
 }
 
 // methods for configure fory.

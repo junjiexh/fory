@@ -26,12 +26,8 @@ import (
 
 const (
 	SmallNumFieldsThreshold = 31
-	FieldNameSizeThreshold  = 15
-	META_SIZE_MASK          = 0xFFF
-	COMPRESS_META_FLAG      = 0b1 << 13
-	HAS_FIELDS_META_FLAG    = 0b1 << 12
-	NUM_HASH_BITS           = 50
 	REGISTER_BY_NAME_FLAG   = 0b1 << 5
+	FieldNameSizeThreshold  = 15
 )
 
 // BuildTypeDef converts a Go type into a TypeDef
@@ -48,7 +44,6 @@ func BuildTypeDef(fory *Fory, value reflect.Value) (*TypeDef, error) {
 	typeDef := NewTypeDef()
 	typeDef.SetFieldInfos(fieldInfos)
 
-	// Encode the TypeDef into binary format
 	encoded, err := encodeTypeDef(fory.typeResolver, value, fieldInfos)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode class definition: %w", err)
@@ -95,17 +90,14 @@ func encodeTypeDef(typeResolver *typeResolver, value reflect.Value, fieldInfos [
 
 	metaBuffer := NewByteBuffer(nil)
 
-	// Write meta header
 	if err := writeMetaHeader(typeResolver, metaBuffer, value, fieldInfos); err != nil {
 		return nil, fmt.Errorf("failed to write meta header: %w", err)
 	}
 
-	// Write fields info
 	if err := writeFieldsInfo(typeResolver, metaBuffer, fieldInfos); err != nil {
 		return nil, fmt.Errorf("failed to write fields info: %w", err)
 	}
 
-	// Write global binary header
 	result, err := prependGlobalHeader(buffer, false, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write global binary header: %w", err)
@@ -119,21 +111,17 @@ func prependGlobalHeader(buffer *ByteBuffer, isCompressed bool, hasFieldsMeta bo
 	var header uint64
 	metaSize := buffer.WriterIndex()
 
-	// Hash (50 bits, upper bits)
 	hashValue := murmur3.Sum64WithSeed(buffer.GetByteSlice(0, metaSize), 47)
 	header |= hashValue << (64 - NUM_HASH_BITS)
 
-	// Write fields meta flag (13th bit)
 	if hasFieldsMeta {
 		header |= HAS_FIELDS_META_FLAG
 	}
 
-	// Compress flag (14th bit)
 	if isCompressed {
 		header |= COMPRESS_META_FLAG
 	}
 
-	// Meta size (12 bits, lower bits)
 	if metaSize < META_SIZE_MASK {
 		header |= uint64(metaSize) & 0xFFF
 	} else {
@@ -143,7 +131,6 @@ func prependGlobalHeader(buffer *ByteBuffer, isCompressed bool, hasFieldsMeta bo
 	result := NewByteBuffer(make([]byte, metaSize+8))
 	result.WriteInt64(int64(header))
 
-	// If meta size >= 4095, write the additional size as varint
 	if metaSize >= META_SIZE_MASK {
 		result.WriteVarUint32(uint32(metaSize - META_SIZE_MASK))
 	}
