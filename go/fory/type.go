@@ -19,14 +19,13 @@ package fory
 
 import (
 	"fmt"
+	"github.com/apache/fory/go/fory/meta"
 	"hash/fnv"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/apache/fory/go/fory/meta"
 )
 
 type TypeId = int16
@@ -112,8 +111,6 @@ const (
 	ARROW_RECORD_BATCH = 38
 	// ARROW_TABLE an arrow table object
 	ARROW_TABLE = 39
-	// UNKNOWN types not determined at compile time
-	UNKNOWN = 63
 
 	// UINT8 Unsigned 8-bit little-endian integer
 	UINT8 = 100 // Not in mapping table, assign a higher value
@@ -286,11 +283,6 @@ type typeResolver struct {
 	namespaceDecoder *meta.Decoder
 	typeNameEncoder  *meta.Encoder
 	typeNameDecoder  *meta.Decoder
-
-	// meta share related
-	shareMeta       bool
-	typeToTypeDef   map[reflect.Type]*TypeDef
-	metaIdToTypeDef map[int64]*TypeDef
 }
 
 func newTypeResolver(fory *Fory) *typeResolver {
@@ -326,10 +318,6 @@ func newTypeResolver(fory *Fory) *typeResolver {
 		namespaceDecoder: meta.NewDecoder('.', '_'),
 		typeNameEncoder:  meta.NewEncoder('$', '_'),
 		typeNameDecoder:  meta.NewDecoder('$', '_'),
-
-		shareMeta:       fory.shareMeta,
-		typeToTypeDef:   make(map[reflect.Type]*TypeDef),
-		metaIdToTypeDef: make(map[int64]*TypeDef),
 	}
 	// base type info for encode/decode types.
 	// composite types info will be constructed dynamically.
@@ -692,7 +680,7 @@ func calcTypeHash(typ reflect.Type) uint64 {
 	return h.Sum64()
 }
 
-func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo, value reflect.Value) error {
+func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo) error {
 	// Extract the internal type ID (lower 8 bits)
 	typeID := typeInfo.TypeID
 	internalTypeID := typeID
@@ -705,13 +693,6 @@ func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo, valu
 
 	// For namespaced types, write additional metadata:
 	if IsNamespacedType(TypeId(internalTypeID)) {
-		if r.shareMeta {
-			if err := r.writeSharedTypeMeta(buffer, typeInfo, value); err != nil {
-				return err
-			}
-			return nil
-		}
-
 		// Write package path (namespace) metadata
 		if err := r.metaStringResolver.WriteMetaStringBytes(buffer, typeInfo.PkgPathBytes); err != nil {
 			return err
@@ -959,10 +940,6 @@ func (r *typeResolver) readTypeInfo(buffer *ByteBuffer) (TypeInfo, error) {
 		internalTypeID = -internalTypeID
 	}
 	if IsNamespacedType(TypeId(internalTypeID)) {
-		if r.shareMeta {
-			return r.readSharedTypeMeta(buffer)
-		}
-
 		// Read namespace and type name metadata bytes
 		nsBytes, err := r.metaStringResolver.ReadMetaStringBytes(buffer)
 		if err != nil {
@@ -1029,78 +1006,6 @@ func (r *typeResolver) readTypeInfo(buffer *ByteBuffer) (TypeInfo, error) {
 	}
 
 	return TypeInfo{}, nil
-}
-
-func (r *typeResolver) writeSharedTypeMeta(buffer *ByteBuffer, typeInfo TypeInfo, value reflect.Value) error {
-	context := r.fory.metaContext
-	typ := value.Type()
-
-	if index, exists := context.typeMap[typ]; exists {
-		buffer.WriteVarUint32(index)
-		return nil
-	}
-
-	newIndex := uint32(len(context.typeMap))
-	buffer.WriteVarUint32(newIndex)
-	context.typeMap[typ] = newIndex
-
-	typeDef, err := r.getOrCreateTypeDef(typeInfo.Type, value)
-	if err != nil {
-		return err
-	}
-	context.writingTypeDefs = append(context.writingTypeDefs, typeDef)
-	return nil
-}
-
-func (r *typeResolver) getOrCreateTypeDef(typ reflect.Type, value reflect.Value) (*TypeDef, error) {
-	if existingTypeDef, exists := r.typeToTypeDef[typ]; exists {
-		return existingTypeDef, nil
-	}
-
-	typeDef, err := buildTypeDef(r.fory, value)
-	if err != nil {
-		return nil, err
-	}
-	r.typeToTypeDef[typ] = typeDef
-	return typeDef, nil
-}
-
-func (r *typeResolver) readSharedTypeMeta(buffer *ByteBuffer) (TypeInfo, error) {
-	context := r.fory.metaContext
-	index := buffer.ReadVarInt32() // shared meta index id
-	return context.readTypeInfos[index], nil
-}
-
-func (r *typeResolver) writeTypeDefs(buffer *ByteBuffer) {
-	context := r.fory.metaContext
-	sz := len(context.writingTypeDefs)
-	buffer.WriteVarUint32(uint32(sz))
-	for _, typeDef := range context.writingTypeDefs {
-		typeDef.writeTypeDef(buffer)
-	}
-	context.writingTypeDefs = nil
-}
-
-func (r *typeResolver) readTypeDefs(buffer *ByteBuffer) error {
-	numTypeDefs := buffer.ReadVarUint32()
-	context := r.fory.metaContext
-	for i := uint32(0); i < numTypeDefs; i++ {
-		id := buffer.ReadInt64()
-		var td *TypeDef
-		if existingTd, exists := r.metaIdToTypeDef[id]; exists {
-			skipTypeDef(buffer, id)
-			td = existingTd
-		} else {
-			newTd, err := readTypeDefs(r.fory, buffer)
-			if err != nil {
-				return err
-			}
-			r.metaIdToTypeDef[id] = newTd
-			td = newTd
-		}
-		context.readTypeDefs = append(context.readTypeDefs, td)
-	}
-	return nil
 }
 
 // TypeUnregisteredError indicates when a requested type is not registered
