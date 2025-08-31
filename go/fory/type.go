@@ -173,19 +173,6 @@ const (
 	FORY_ARROW_TABLE            = 268
 )
 
-var polymorphicTypes = map[TypeId]struct{}{
-	STRUCT:                  {},
-	COMPATIBLE_STRUCT:       {},
-	NAMED_STRUCT:            {},
-	NAMED_COMPATIBLE_STRUCT: {},
-	NAMED_EXT:               {},
-}
-
-func IsPolymorphicType(typeID TypeId) bool {
-	_, exists := polymorphicTypes[typeID]
-	return exists
-}
-
 var namedTypes = map[TypeId]struct{}{
 	FORY_TYPE_TAG:           {},
 	NAMED_EXT:               {},

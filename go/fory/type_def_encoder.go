@@ -142,7 +142,7 @@ func writeMetaHeader(buffer *ByteBuffer, typeDef *TypeDef) error {
 // writeFieldsInfo writes field information according to the specification
 // field info layout as following:
 //   - first 1 byte: header (2 bits field name encoding + 4 bits size + nullability flag + ref tracking flag)
-//   - next variable bytes: fieldType info
+//   - next variable bytes: FieldType info
 //   - next variable bytes: field name or tag id
 func writeFieldsInfo(typeResolver *typeResolver, buffer *ByteBuffer, fieldInfos []FieldInfo) error {
 	for _, field := range fieldInfos {

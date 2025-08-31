@@ -106,7 +106,7 @@ func buildTypeDef(fory *Fory, value reflect.Value) (*TypeDef, error) {
 FieldInfo contains information about a single field in a struct
 field info layout as following:
   - first 1 byte: header (2 bits field name encoding + 4 bits size + nullability flag + ref tracking flag)
-  - next variable bytes: fieldType info
+  - next variable bytes: FieldType info
   - next variable bytes: field name or tag id
 */
 type FieldInfo struct {
@@ -114,7 +114,7 @@ type FieldInfo struct {
 	nameEncoding meta.Encoding
 	nullable     bool
 	trackingRef  bool
-	fieldType    fieldType
+	fieldType    FieldType
 }
 
 // buildFieldInfos extracts field information from a struct value
@@ -147,8 +147,8 @@ func buildFieldInfos(fory *Fory, value reflect.Value) ([]FieldInfo, error) {
 	return fieldInfos, nil
 }
 
-// fieldType interface represents different field types, including object, collection, and map types
-type fieldType interface {
+// FieldType interface represents different field types, including object, collection, and map types
+type FieldType interface {
 	TypeId() TypeId
 	write(*ByteBuffer)
 }
@@ -164,7 +164,7 @@ func (b *BaseFieldType) write(buffer *ByteBuffer) {
 }
 
 // readFieldInfo reads field type info from the buffer according to the TypeId
-func readFieldType(buffer *ByteBuffer) (fieldType, error) {
+func readFieldType(buffer *ByteBuffer) (FieldType, error) {
 	typeId := buffer.ReadVarUint32Small7()
 	if typeId == LIST || typeId == SET {
 		panic("not implement yet")
@@ -178,14 +178,14 @@ func readFieldType(buffer *ByteBuffer) (fieldType, error) {
 // CollectionFieldType represents collection types like List, Set
 type CollectionFieldType struct {
 	BaseFieldType
-	elementType fieldType
+	elementType FieldType
 }
 
 // MapFieldType represents map types
 type MapFieldType struct {
 	BaseFieldType
-	keyType   fieldType
-	valueType fieldType
+	keyType   FieldType
+	valueType FieldType
 }
 
 // ObjectFieldType represents object field types that aren't registered or collection/map types
@@ -203,7 +203,7 @@ func NewObjectFieldType(typeId TypeId) *ObjectFieldType {
 
 // todo: implement buildFieldType for collection and map types
 // buildFieldType builds field type from reflect.Type, handling collection, map and object types
-func buildFieldType(fory *Fory, fieldValue reflect.Value) (fieldType, error) {
+func buildFieldType(fory *Fory, fieldValue reflect.Value) (FieldType, error) {
 	fieldType := fieldValue.Type()
 
 	var typeId TypeId
