@@ -19,14 +19,13 @@ package fory
 
 import (
 	"fmt"
+	"github.com/apache/fory/go/fory/meta"
 	"hash/fnv"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/apache/fory/go/fory/meta"
 )
 
 type TypeId = int16
