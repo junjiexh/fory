@@ -30,6 +30,7 @@ func NewFory(referenceTracking bool) *Fory {
 		referenceTracking: referenceTracking,
 		language:          XLANG,
 		buffer:            NewByteBuffer(nil),
+		shareMeta:         false,
 	}
 	// Create a new type resolver for this instance
 	fory.typeResolver = newTypeResolver(fory)
@@ -113,6 +114,31 @@ type Fory struct {
 	peerLanguage      Language
 	buffer            *ByteBuffer
 	buffers           []*ByteBuffer
+	shareMeta         bool
+	metaContext       *MetaContext
+}
+
+// MetaContext used to share data across multiple serialization calls
+type MetaContext struct {
+	// typeMap make sure each type just fully serialize once, the following serialization will use the index
+	typeMap map[reflect.Type]uint32
+	// record typeDefs need to be serialized during one serialization
+	writingTypeDefs []*TypeDef
+	// read from peer
+	readTypeInfos []TypeInfo
+}
+
+func NewMetaContext() *MetaContext {
+	return &MetaContext{
+		typeMap: make(map[reflect.Type]uint32),
+	}
+}
+
+// Set meta context, which can be used to share data across multiple serialization call. Note that
+// code metaContext will be cleared after the serialization is finished. Please set the context
+// before every serialization if metaShare is enabled
+func (f *Fory) SetMetaContext(metaContext *MetaContext) {
+	f.metaContext = metaContext
 }
 
 func (f *Fory) RegisterTagType(tag string, v interface{}) error {
@@ -246,7 +272,18 @@ func (f *Fory) readLength(buffer *ByteBuffer) int {
 }
 
 func (f *Fory) WriteReferencable(buffer *ByteBuffer, value reflect.Value) error {
-	return f.writeReferencableBySerializer(buffer, value, nil)
+	metaOffset := buffer.writerIndex
+	if f.shareMeta {
+		buffer.WriteInt32(-1)
+	}
+	if err := f.writeReferencableBySerializer(buffer, value, nil); err != nil {
+		return err
+	}
+	if f.shareMeta && f.metaContext != nil && len(f.metaContext.writingTypeDefs) > 0 {
+		buffer.PutInt32(metaOffset, int32(buffer.writerIndex-metaOffset-4))
+		f.typeResolver.writeTypeDefs(buffer)
+	}
+	return nil
 }
 
 func (f *Fory) writeReferencableBySerializer(buffer *ByteBuffer, value reflect.Value, serializer Serializer) error {
@@ -367,6 +404,19 @@ func (f *Fory) Deserialize(buf *ByteBuffer, v interface{}, buffers []*ByteBuffer
 				"produced with buffer_callback null")
 		}
 	}
+
+	if f.shareMeta {
+		typeDefOffset := buf.ReadInt32()
+		if typeDefOffset >= 0 {
+			save := buf.readerIndex
+			buf.SetReaderIndex(save + int(typeDefOffset))
+			if err := f.typeResolver.readTypeDefs(buf); err != nil {
+				return fmt.Errorf("failed to read typeDefs: %w", err)
+			}
+			buf.SetReaderIndex(save)
+		}
+	}
+
 	if isXLangFlag {
 		return f.ReadReferencable(buf, reflect.ValueOf(v).Elem())
 	} else {

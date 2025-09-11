@@ -66,8 +66,21 @@ func (td *TypeDef) writeTypeDef(buffer *ByteBuffer) {
 	buffer.WriteBinary(td.encoded)
 }
 
-func readTypeDef(fory *Fory, buffer *ByteBuffer) (*TypeDef, error) {
-	return decodeTypeDef(fory, buffer)
+// buildTypeInfo constructs a TypeInfo from the TypeDef
+func (td *TypeDef) buildTypeInfo() (TypeInfo, error) {
+	info := TypeInfo{
+		Type:         td.typ,
+		TypeID:       int32(td.typeId),
+		Serializer:   &structSerializer{type_: td.typ, fieldDefs: td.fieldDefs},
+		PkgPathBytes: td.nsName,
+		NameBytes:    td.typeName,
+		IsDynamic:    td.typeId < 0,
+	}
+	return info, nil
+}
+
+func readTypeDef(fory *Fory, buffer *ByteBuffer, header int64) (*TypeDef, error) {
+	return decodeTypeDef(fory, buffer, header)
 }
 
 func skipTypeDef(buffer *ByteBuffer, header int64) {
@@ -128,7 +141,7 @@ func buildFieldDefs(fory *Fory, value reflect.Value) ([]FieldDef, error) {
 		fieldValue := value.Field(i)
 
 		var fieldInfo FieldDef
-		fieldName := field.Name
+		fieldName := SnakeCase(field.Name)
 
 		nameEncoding := fory.typeResolver.typeNameEncoder.ComputeEncodingWith(fieldName, fieldNameEncodings)
 
@@ -152,6 +165,7 @@ func buildFieldDefs(fory *Fory, value reflect.Value) ([]FieldDef, error) {
 type FieldType interface {
 	TypeId() TypeId
 	write(*ByteBuffer)
+	getSerializer(*Fory) (Serializer, error)
 }
 
 // BaseFieldType provides common functionality for field types
@@ -162,6 +176,18 @@ type BaseFieldType struct {
 func (b *BaseFieldType) TypeId() TypeId { return b.typeId }
 func (b *BaseFieldType) write(buffer *ByteBuffer) {
 	buffer.WriteVarUint32Small7(uint32(b.typeId))
+}
+
+func (o *BaseFieldType) getSerializer(fory *Fory) (Serializer, error) {
+	if o.typeId == EXTENSION || o.typeId == STRUCT || o.typeId == NAMED_STRUCT ||
+		o.typeId == COMPATIBLE_STRUCT || o.typeId == NAMED_COMPATIBLE_STRUCT || o.typeId == UNKNOWN_TYPE_ID {
+		return nil, nil
+	}
+	info, err := fory.typeResolver.getTypeInfoById(o.typeId)
+	if err != nil {
+		return nil, err
+	}
+	return info.Serializer, nil
 }
 
 // readFieldInfo reads field type info from the buffer according to the TypeId
