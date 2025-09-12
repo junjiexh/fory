@@ -111,7 +111,7 @@ func (s *structSerializer) Read(f *Fory, buf *ByteBuffer, type_ reflect.Type, va
 		}
 	}
 	structHash := buf.ReadInt32()
-	if !f.shareMeta && structHash != s.structHash {
+	if !f.compatible && structHash != s.structHash {
 		return fmt.Errorf("hash %d is not consistent with %d for type %s",
 			structHash, s.structHash, s.type_)
 	}
