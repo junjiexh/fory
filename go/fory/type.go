@@ -719,7 +719,7 @@ func calcTypeHash(type_ reflect.Type) uint64 {
 }
 
 func (r *typeResolver) metaShareEnabled() bool {
-	return r.fory != nil && r.fory.metaContext != nil && r.fory.shareMeta
+	return r.fory != nil && r.fory.metaContext != nil && r.fory.compatible
 }
 
 func (r *typeResolver) writeTypeInfo(buffer *ByteBuffer, typeInfo TypeInfo) error {

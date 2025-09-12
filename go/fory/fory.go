@@ -24,16 +24,61 @@ import (
 	"sync"
 )
 
+// ForyOption represents a configuration option for Fory instances
+type ForyOption func(*Fory)
+
+// WithCompatible sets the compatible mode for the Fory instance
+func WithCompatible(compatible bool) ForyOption {
+	return func(f *Fory) {
+		f.compatible = compatible
+	}
+}
+
+// WithReferenceTracking sets the reference tracking mode for the Fory instance
+func WithReferenceTracking(referenceTracking bool) ForyOption {
+	return func(f *Fory) {
+		f.referenceTracking = referenceTracking
+	}
+}
+
+// WithScopedMetaShare sets the scoped meta share mode for the Fory instance
+func WithScopedMetaShare(enabled bool) ForyOption {
+	return func(f *Fory) {
+		if f.metaContext == nil {
+			f.metaContext = NewMetaContext(enabled)
+		} else {
+			f.metaContext.SetScopedMetaShareEnabled(enabled)
+		}
+	}
+}
+
 func NewFory(referenceTracking bool) *Fory {
+	return NewForyWithOptions(WithReferenceTracking(referenceTracking))
+}
+
+// NewForyWithOptions creates a Fory instance with configurable options
+func NewForyWithOptions(options ...ForyOption) *Fory {
 	fory := &Fory{
-		refResolver:       newRefResolver(referenceTracking),
-		referenceTracking: referenceTracking,
+		refResolver:       newRefResolver(true),
+		referenceTracking: true,
 		language:          XLANG,
 		buffer:            NewByteBuffer(nil),
-		shareMeta:         false,
+		compatible:        false,
 	}
-	// Create a new type resolver for this instance
+
+	// Apply options
+	for _, option := range options {
+		option(fory)
+	}
+
+	// Create a new type resolver for this instance but copy generated serializers from global resolver
 	fory.typeResolver = newTypeResolver(fory)
+
+	// Initialize meta context if compatible mode is enabled
+	if fory.compatible {
+		fory.metaContext = NewMetaContext(true)
+	}
+
 	return fory
 }
 
@@ -114,31 +159,8 @@ type Fory struct {
 	peerLanguage      Language
 	buffer            *ByteBuffer
 	buffers           []*ByteBuffer
-	shareMeta         bool
+	compatible        bool
 	metaContext       *MetaContext
-}
-
-// MetaContext used to share data across multiple serialization calls
-type MetaContext struct {
-	// typeMap make sure each type just fully serialize once, the following serialization will use the index
-	typeMap map[reflect.Type]uint32
-	// record typeDefs need to be serialized during one serialization
-	writingTypeDefs []*TypeDef
-	// read from peer
-	readTypeInfos []TypeInfo
-}
-
-func NewMetaContext() *MetaContext {
-	return &MetaContext{
-		typeMap: make(map[reflect.Type]uint32),
-	}
-}
-
-// Set meta context, which can be used to share data across multiple serialization call. Note that
-// code metaContext will be cleared after the serialization is finished. Please set the context
-// before every serialization if metaShare is enabled
-func (f *Fory) SetMetaContext(metaContext *MetaContext) {
-	f.metaContext = metaContext
 }
 
 func (f *Fory) RegisterTagType(tag string, v interface{}) error {
@@ -273,13 +295,13 @@ func (f *Fory) readLength(buffer *ByteBuffer) int {
 
 func (f *Fory) WriteReferencable(buffer *ByteBuffer, value reflect.Value) error {
 	metaOffset := buffer.writerIndex
-	if f.shareMeta {
+	if f.compatible {
 		buffer.WriteInt32(-1)
 	}
 	if err := f.writeReferencableBySerializer(buffer, value, nil); err != nil {
 		return err
 	}
-	if f.shareMeta && f.metaContext != nil && len(f.metaContext.writingTypeDefs) > 0 {
+	if f.compatible && f.metaContext != nil && len(f.metaContext.writingTypeDefs) > 0 {
 		buffer.PutInt32(metaOffset, int32(buffer.writerIndex-metaOffset-4))
 		f.typeResolver.writeTypeDefs(buffer)
 	}
@@ -405,7 +427,7 @@ func (f *Fory) Deserialize(buf *ByteBuffer, v interface{}, buffers []*ByteBuffer
 		}
 	}
 
-	if f.shareMeta {
+	if f.compatible {
 		typeDefOffset := buf.ReadInt32()
 		if typeDefOffset >= 0 {
 			save := buf.readerIndex
@@ -525,11 +547,25 @@ func (f *Fory) Reset() {
 func (f *Fory) resetWrite() {
 	f.typeResolver.resetWrite()
 	f.refResolver.resetWrite()
+	if f.metaContext != nil {
+		if f.metaContext.IsScopedMetaShareEnabled() {
+			f.metaContext.resetWrite()
+		} else {
+			f.metaContext = nil
+		}
+	}
 }
 
 func (f *Fory) resetRead() {
 	f.typeResolver.resetRead()
 	f.refResolver.resetRead()
+	if f.metaContext != nil {
+		if f.metaContext.IsScopedMetaShareEnabled() {
+			f.metaContext.resetRead()
+		} else {
+			f.metaContext = nil
+		}
+	}
 }
 
 // methods for configure fory.
