@@ -59,8 +59,8 @@ func NewFory(referenceTracking bool) *Fory {
 // NewForyWithOptions creates a Fory instance with configurable options
 func NewForyWithOptions(options ...ForyOption) *Fory {
 	fory := &Fory{
-		refResolver:       newRefResolver(true),
-		referenceTracking: true,
+		refResolver:       nil,
+		referenceTracking: false,
 		language:          XLANG,
 		buffer:            NewByteBuffer(nil),
 		compatible:        false,
@@ -89,6 +89,7 @@ func NewForyWithOptions(options ...ForyOption) *Fory {
 		fory.metaContext = NewMetaContext(true)
 	}
 
+	fory.refResolver = newRefResolver(fory.referenceTracking)
 	return fory
 }
 
@@ -101,8 +102,8 @@ func NewForyWithIsolatedTypes(referenceTracking bool) *Fory {
 // NewForyWithIsolatedTypesAndOptions creates a Fory instance with isolated type resolver and configurable options
 func NewForyWithIsolatedTypesAndOptions(options ...ForyOption) *Fory {
 	fory := &Fory{
-		refResolver:       newRefResolver(true),
-		referenceTracking: true,
+		refResolver:       nil,
+		referenceTracking: false,
 		language:          XLANG,
 		buffer:            NewByteBuffer(nil),
 		compatible:        false,
@@ -119,6 +120,7 @@ func NewForyWithIsolatedTypesAndOptions(options ...ForyOption) *Fory {
 	}
 
 	fory.typeResolver = newTypeResolver(fory)
+	fory.refResolver = newRefResolver(fory.referenceTracking)
 	return fory
 }
 
