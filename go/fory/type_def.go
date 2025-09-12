@@ -158,6 +158,40 @@ func buildFieldDefs(fory *Fory, value reflect.Value) ([]FieldDef, error) {
 		}
 		fieldInfos = append(fieldInfos, fieldInfo)
 	}
+
+	// Sort field definitions
+	if len(fieldInfos) > 1 {
+		// Extract serializers and names for sorting
+		serializers := make([]Serializer, len(fieldInfos))
+		fieldNames := make([]string, len(fieldInfos))
+		for i, fieldInfo := range fieldInfos {
+			serializer, err := fieldInfo.fieldType.getSerializer(fory)
+			if err != nil {
+				// If we can't get serializer, use nil (will be handled by sortFields)
+				serializers[i] = nil
+			} else {
+				serializers[i] = serializer
+			}
+			fieldNames[i] = fieldInfo.name
+		}
+
+		// Use existing sortFields function to get optimal order
+		_, sortedNames := sortFields(fory.typeResolver, fieldNames, serializers)
+
+		// Rebuild fieldInfos in the sorted order
+		nameToFieldInfo := make(map[string]FieldDef)
+		for _, fieldInfo := range fieldInfos {
+			nameToFieldInfo[fieldInfo.name] = fieldInfo
+		}
+
+		sortedFieldInfos := make([]FieldDef, len(fieldInfos))
+		for i, name := range sortedNames {
+			sortedFieldInfos[i] = nameToFieldInfo[name]
+		}
+
+		fieldInfos = sortedFieldInfos
+	}
+
 	return fieldInfos, nil
 }
 

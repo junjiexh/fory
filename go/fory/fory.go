@@ -59,8 +59,8 @@ func NewFory(referenceTracking bool) *Fory {
 // NewForyWithOptions creates a Fory instance with configurable options
 func NewForyWithOptions(options ...ForyOption) *Fory {
 	fory := &Fory{
-		refResolver:       newRefResolver(true),
-		referenceTracking: true,
+		refResolver:       nil,
+		referenceTracking: false,
 		language:          XLANG,
 		buffer:            NewByteBuffer(nil),
 		compatible:        false,
@@ -79,6 +79,7 @@ func NewForyWithOptions(options ...ForyOption) *Fory {
 		fory.metaContext = NewMetaContext(true)
 	}
 
+	fory.refResolver = newRefResolver(fory.referenceTracking)
 	return fory
 }
 
