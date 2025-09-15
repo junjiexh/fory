@@ -153,7 +153,7 @@ func buildFieldDefs(fory *Fory, value reflect.Value) ([]FieldDef, error) {
 			name:         fieldName,
 			nameEncoding: nameEncoding,
 			nullable:     nullable(field.Type),
-			trackingRef:  fory.referenceTracking,
+			trackingRef:  fory.refTracking,
 			fieldType:    ft,
 		}
 		fieldInfos = append(fieldInfos, fieldInfo)

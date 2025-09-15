@@ -102,7 +102,7 @@ func (s sliceSerializer) writeHeader(f *Fory, buf *ByteBuffer, value reflect.Val
 	}
 
 	// Enable reference tracking if configured
-	if f.referenceTracking {
+	if f.refTracking {
 		collectFlag |= CollectionTrackingRef
 	}
 
@@ -1093,7 +1093,7 @@ func (s stringSliceSerializer) Read(f *Fory, buf *ByteBuffer, type_ reflect.Type
 				}
 			}
 			elem := readString(buf)
-			if f.referenceTracking && refFlag == RefValueFlag {
+			if f.refTracking && refFlag == RefValueFlag {
 				// If value is not nil(reflect), then value is a pointer to some variable, we can update the `value`,
 				// then record `value` in the reference resolver.
 				f.refResolver.SetReadObject(nextReadRefId, reflect.ValueOf(elem))

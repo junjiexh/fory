@@ -110,7 +110,7 @@ func (s setSerializer) writeHeader(f *Fory, buf *ByteBuffer, keys []reflect.Valu
 	}
 
 	// Enable reference tracking if configured
-	if f.referenceTracking {
+	if f.refTracking {
 		collectFlag |= CollectionTrackingRef
 	}
 

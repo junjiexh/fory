@@ -34,10 +34,10 @@ func WithCompatible(compatible bool) ForyOption {
 	}
 }
 
-// WithReferenceTracking sets the reference tracking mode for the Fory instance
-func WithReferenceTracking(referenceTracking bool) ForyOption {
+// WithRefTracking sets the reference tracking mode for the Fory instance
+func WithRefTracking(refTracking bool) ForyOption {
 	return func(f *Fory) {
-		f.referenceTracking = referenceTracking
+		f.refTracking = refTracking
 	}
 }
 
@@ -52,18 +52,18 @@ func WithScopedMetaShare(enabled bool) ForyOption {
 	}
 }
 
-func NewFory(referenceTracking bool) *Fory {
-	return NewForyWithOptions(WithReferenceTracking(referenceTracking))
+func NewFory(refTracking bool) *Fory {
+	return NewForyWithOptions(WithRefTracking(refTracking))
 }
 
 // NewForyWithOptions creates a Fory instance with configurable options
 func NewForyWithOptions(options ...ForyOption) *Fory {
 	fory := &Fory{
-		refResolver:       nil,
-		referenceTracking: false,
-		language:          XLANG,
-		buffer:            NewByteBuffer(nil),
-		compatible:        false,
+		refResolver: nil,
+		refTracking: false,
+		language:    XLANG,
+		buffer:      NewByteBuffer(nil),
+		compatible:  false,
 	}
 
 	// Apply options
@@ -79,7 +79,7 @@ func NewForyWithOptions(options ...ForyOption) *Fory {
 		fory.metaContext = NewMetaContext(true)
 	}
 
-	fory.refResolver = newRefResolver(fory.referenceTracking)
+	fory.refResolver = newRefResolver(fory.refTracking)
 	return fory
 }
 
@@ -152,16 +152,16 @@ const (
 const MAGIC_NUMBER int16 = 0x62D4
 
 type Fory struct {
-	typeResolver      *typeResolver
-	refResolver       *RefResolver
-	referenceTracking bool
-	language          Language
-	bufferCallback    BufferCallback
-	peerLanguage      Language
-	buffer            *ByteBuffer
-	buffers           []*ByteBuffer
-	compatible        bool
-	metaContext       *MetaContext
+	typeResolver   *typeResolver
+	refResolver    *RefResolver
+	refTracking    bool
+	language       Language
+	bufferCallback BufferCallback
+	peerLanguage   Language
+	buffer         *ByteBuffer
+	buffers        []*ByteBuffer
+	compatible     bool
+	metaContext    *MetaContext
 }
 
 func (f *Fory) RegisterTagType(tag string, v interface{}) error {
@@ -575,6 +575,6 @@ func (f *Fory) SetLanguage(language Language) {
 	f.language = language
 }
 
-func (f *Fory) SetReferenceTracking(referenceTracking bool) {
-	f.referenceTracking = referenceTracking
+func (f *Fory) SetRefTracking(refTracking bool) {
+	f.refTracking = refTracking
 }
