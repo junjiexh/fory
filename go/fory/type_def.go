@@ -69,9 +69,9 @@ func (td *TypeDef) writeTypeDef(buffer *ByteBuffer) {
 // buildTypeInfo constructs a TypeInfo from the TypeDef
 func (td *TypeDef) buildTypeInfo() (TypeInfo, error) {
 	info := TypeInfo{
-		Type:         td.typ,
+		Type:         td.type_,
 		TypeID:       int32(td.typeId),
-		Serializer:   &structSerializer{type_: td.typ, fieldDefs: td.fieldDefs},
+		Serializer:   &structSerializer{type_: td.type_, fieldDefs: td.fieldDefs},
 		PkgPathBytes: td.nsName,
 		NameBytes:    td.typeName,
 		IsDynamic:    td.typeId < 0,

@@ -146,6 +146,38 @@ fory --force -file <your file>
 - Does generated code work across Go versions? Yes, it’s plain Go code; keep your toolchain consistent in CI.
 - Can I mix generated and non-generated structs? Yes, adoption is incremental and per file.
 
+## Configuration Options
+
+Fory Go supports several configuration options through the functional options pattern:
+
+### Compatible Mode (Metashare)
+
+Compatible mode enables meta information sharing, which allows for schema evolution:
+
+```go
+// Enable compatible mode with metashare
+fory := NewForyWithOptions(WithCompatible(true))
+```
+
+### Reference Tracking
+
+Enable reference tracking:
+
+```go
+fory := NewForyWithOptions(WithRefTracking(true))
+```
+
+### Combined Options
+
+You can combine multiple options:
+
+```go
+fory := NewForyWithOptions(
+    WithCompatible(true),
+    WithRefTracking(true),
+)
+```
+
 ## How to test
 
 ```bash

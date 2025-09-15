@@ -62,7 +62,7 @@ func decodeTypeDef(fory *Fory, buffer *ByteBuffer, header int64) (*TypeDef, erro
 	// Read name or type ID according to the registerByName flag
 	var typeId TypeId
 	var nsBytes, nameBytes *MetaStringBytes
-	var typ reflect.Type
+	var type_ reflect.Type
 	if registeredByName {
 		// Read namespace and type name for namespaced types
 		readingNsBytes, err := fory.typeResolver.metaStringResolver.ReadMetaStringBytes(metaBuffer)
@@ -80,13 +80,13 @@ func decodeTypeDef(fory *Fory, buffer *ByteBuffer, header int64) (*TypeDef, erro
 			return nil, fmt.Errorf("type not registered")
 		}
 		typeId = TypeId(info.TypeID)
-		typ = info.Type
+		type_ = info.Type
 	} else {
 		typeId = TypeId(metaBuffer.ReadVarInt32())
 		if info, err := fory.typeResolver.getTypeInfoById(typeId); err != nil {
 			return nil, fmt.Errorf("failed to get type info by id %d: %w", typeId, err)
 		} else {
-			typ = info.Type
+			type_ = info.Type
 		}
 	}
 
@@ -105,7 +105,7 @@ func decodeTypeDef(fory *Fory, buffer *ByteBuffer, header int64) (*TypeDef, erro
 	// Create TypeDef
 	typeDef := NewTypeDef(typeId, nsBytes, nameBytes, registeredByName, isCompressed, fieldInfos)
 	typeDef.encoded = encoded
-	typeDef.typ = typ
+	typeDef.type_ = type_
 
 	return typeDef, nil
 }

@@ -24,25 +24,35 @@ import (
 	"sync"
 )
 
-// ForyOption represents a configuration option for Fory instances
-type ForyOption func(*Fory)
+// Option represents a configuration option for Fory instances.
+// This follows the functional options pattern, allowing flexible configuration
+// by passing variadic option functions to constructors like NewForyWithOptions.
+type Option func(*Fory)
 
-// WithCompatible sets the compatible mode for the Fory instance
-func WithCompatible(compatible bool) ForyOption {
+// WithCompatible sets the compatible mode for the Fory instance.
+// When compatible=true, scoped meta sharing is automatically enabled.
+func WithCompatible(compatible bool) Option {
 	return func(f *Fory) {
 		f.compatible = compatible
+		if compatible {
+			f.metaContext = NewMetaContext(true) // Enable scoped meta sharing
+		} else {
+			f.metaContext = nil
+		}
 	}
 }
 
 // WithRefTracking sets the reference tracking mode for the Fory instance
-func WithRefTracking(refTracking bool) ForyOption {
+func WithRefTracking(refTracking bool) Option {
 	return func(f *Fory) {
 		f.refTracking = refTracking
 	}
 }
 
-// WithScopedMetaShare sets the scoped meta share mode for the Fory instance
-func WithScopedMetaShare(enabled bool) ForyOption {
+// WithScopedMetaShare sets the scoped meta share mode for the Fory instance.
+// Note: Compatible mode automatically enables scoped meta sharing.
+// This option is mainly used for fine-grained control when compatible mode is already enabled.
+func WithScopedMetaShare(enabled bool) Option {
 	return func(f *Fory) {
 		if f.metaContext == nil {
 			f.metaContext = NewMetaContext(enabled)
@@ -57,7 +67,7 @@ func NewFory(refTracking bool) *Fory {
 }
 
 // NewForyWithOptions creates a Fory instance with configurable options
-func NewForyWithOptions(options ...ForyOption) *Fory {
+func NewForyWithOptions(options ...Option) *Fory {
 	fory := &Fory{
 		refResolver: nil,
 		refTracking: false,

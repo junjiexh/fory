@@ -26,20 +26,20 @@ import (
 // Test structs for metashare testing
 
 type SimpleDataClass struct {
-	Name   string `fory:"name"`
-	Age    int32  `fory:"age"`
-	Active bool   `fory:"active"`
+	Name   string
+	Age    int32
+	Active bool
 }
 type ExtendedDataClass struct {
-	Name   string `fory:"name"`
-	Age    int32  `fory:"age"`
-	Active bool   `fory:"active"`
-	Email  string `fory:"email"` // Additional field
+	Name   string
+	Age    int32
+	Active bool
+	Email  string // Additional field
 }
 
 type ReducedDataClass struct {
-	Name string `fory:"name"`
-	Age  int32  `fory:"age"`
+	Name string
+	Age  int32
 	// Missing 'active' field
 }
 
