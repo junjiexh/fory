@@ -19,13 +19,13 @@ use crate::ensure;
 use crate::error::Error;
 use crate::resolver::context::ReadContext;
 use crate::resolver::context::WriteContext;
-use crate::serializer::Serializer;
-use crate::types::SIZE_OF_REF_AND_TYPE;
+use crate::serializer::{deserialize, serialize, Serializer};
+use crate::types::{Mode, SIZE_OF_REF_AND_TYPE};
 use anyhow::anyhow;
 
 // const TRACKING_REF: u8 = 0b1;
 
-const HAS_NULL: u8 = 0b10;
+pub const HAS_NULL: u8 = 0b10;
 
 // Whether collection elements type is not declare type.
 const NOT_DECL_ELEMENT_TYPE: u8 = 0b100;
@@ -36,10 +36,18 @@ const NOT_DECL_ELEMENT_TYPE: u8 = 0b100;
 pub fn write_collection<'a, T: Serializer + 'a, I: IntoIterator<Item = &'a T>>(
     iter: I,
     context: &mut WriteContext,
+    is_field: bool,
+    collection_type_id: u32,
 ) {
+    if *context.get_fory().get_mode() == Mode::Compatible && !is_field {
+        context.writer.var_uint32(collection_type_id);
+    }
     let iter = iter.into_iter();
     let len = iter.size_hint().0;
     context.writer.var_uint32(len as u32);
+    if len == 0 {
+        return;
+    }
     let has_null = T::is_option();
     let mut header = 0;
     if has_null {
@@ -55,24 +63,36 @@ pub fn write_collection<'a, T: Serializer + 'a, I: IntoIterator<Item = &'a T>>(
             .writer
             .reserve((<T as Serializer>::reserved_space()) * len);
         for item in iter {
-            item.write(context);
+            item.write(context, true);
         }
     } else {
         context
             .writer
             .reserve((<T as Serializer>::reserved_space() + SIZE_OF_REF_AND_TYPE) * len);
         for item in iter {
-            item.serialize(context);
+            serialize(item, context, true);
         }
     }
+    println!("bytes after write collection {:?}", context.writer.dump());
 }
 
-pub fn read_collection<C, T>(context: &mut ReadContext) -> Result<C, Error>
+pub fn read_collection<C, T>(
+    context: &mut ReadContext,
+    is_field: bool,
+    expected_collection_type_id: u32,
+) -> Result<C, Error>
 where
     T: Serializer,
     C: FromIterator<T>,
 {
+    if *context.get_fory().get_mode() == Mode::Compatible && !is_field {
+        let remote_collection_type_id = context.reader.var_uint32();
+        assert_eq!(remote_collection_type_id, expected_collection_type_id);
+    }
     let len = context.reader.var_uint32();
+    if len == 0 {
+        return Ok(C::from_iter(std::iter::empty()));
+    }
     let header = context.reader.u8();
     let actual_elem_type_id = context.reader.var_uint32();
     let expected_elem_id = T::get_type_id(context.fory);
@@ -82,11 +102,11 @@ where
     );
     if header & HAS_NULL == 0 {
         (0..len)
-            .map(|_| T::read(context))
+            .map(|_| T::read(context, true))
             .collect::<Result<C, Error>>()
     } else {
         (0..len)
-            .map(|_| T::deserialize(context))
+            .map(|_| deserialize(context, true))
             .collect::<Result<C, Error>>()
     }
 }

@@ -30,7 +30,6 @@ from typing import TypeVar, Union, Iterable
 from pyfory._util import get_bit, set_bit, clear_bit
 from pyfory import _fory as fmod
 from pyfory._fory import Language
-from pyfory._fory import _PicklerStub, _UnpicklerStub, Pickler, Unpickler
 from pyfory._fory import _ENABLE_TYPE_REGISTRATION_FORCIBLY
 from pyfory.lib import mmh3
 from pyfory.meta.metastring import Encoding
@@ -792,13 +791,13 @@ cdef class Fory:
     cdef readonly MetaStringResolver metastring_resolver
     cdef readonly SerializationContext serialization_context
     cdef Buffer buffer
-    cdef public object pickler  # pickle.Pickler
-    cdef public object unpickler  # Optional[pickle.Unpickler]
     cdef object _buffer_callback
     cdef object _buffers  # iterator
     cdef object _unsupported_callback
     cdef object _unsupported_objects  # iterator
     cdef object _peer_language
+    cdef int32_t max_depth
+    cdef int32_t depth
 
     def __init__(
             self,
@@ -806,6 +805,7 @@ cdef class Fory:
             ref_tracking: bool = False,
             require_type_registration: bool = True,
             compatible: bool = False,
+            max_depth: int = 50,
     ):
         """
        :param require_type_registration:
@@ -819,6 +819,10 @@ cdef class Fory:
        :param compatible:
         Whether to enable compatible mode for cross-language serialization.
          When enabled, type forward/backward compatibility for struct fields will be enabled.
+       :param max_depth:
+        The maximum depth of the deserialization data.
+        If the depth exceeds the maximum depth, an exception will be raised.
+        The default value is 50.
         """
         self.language = language
         if _ENABLE_TYPE_REGISTRATION_FORCIBLY or require_type_registration:
@@ -834,23 +838,13 @@ cdef class Fory:
         self.serialization_context = SerializationContext(fory=self, scoped_meta_share_enabled=compatible)
         self.type_resolver.initialize()
         self.buffer = Buffer.allocate(32)
-        if not require_type_registration:
-            warnings.warn(
-                "Type registration is disabled, unknown types can be deserialized "
-                "which may be insecure.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            self.pickler = Pickler(self.buffer)
-        else:
-            self.pickler = _PicklerStub()
-            self.unpickler = _UnpicklerStub()
-        self.unpickler = None
         self._buffer_callback = None
         self._buffers = None
         self._unsupported_callback = None
         self._unsupported_objects = None
         self._peer_language = None
+        self.depth = 0
+        self.max_depth = max_depth
 
     def register_serializer(self, cls: Union[type, TypeVar], Serializer serializer):
         self.type_resolver.register_serializer(cls, serializer)
@@ -898,9 +892,7 @@ cdef class Fory:
             self, obj, Buffer buffer, buffer_callback=None, unsupported_callback=None):
         self._buffer_callback = buffer_callback
         self._unsupported_callback = unsupported_callback
-        if buffer is not None:
-            self.pickler = Pickler(self.buffer)
-        else:
+        if buffer is None:
             self.buffer.writer_index = 0
             buffer = self.buffer
         if self.language == Language.XLANG:
@@ -1044,8 +1036,6 @@ cdef class Fory:
 
     cpdef inline _deserialize(
             self, Buffer buffer, buffers=None, unsupported_objects=None):
-        if not self.require_type_registration:
-            self.unpickler = Unpickler(buffer)
         if unsupported_objects is not None:
             self._unsupported_objects = iter(unsupported_objects)
         if self.language == Language.XLANG:
@@ -1116,7 +1106,9 @@ cdef class Fory:
             return buffer.read_bool()
         elif cls is float:
             return buffer.read_double()
+        self.inc_depth()
         o = typeinfo.serializer.read(buffer)
+        self.depth -= 1
         ref_resolver.set_read_object(ref_id, o)
         return o
 
@@ -1132,7 +1124,10 @@ cdef class Fory:
             return buffer.read_bool()
         elif cls is float:
             return buffer.read_double()
-        return typeinfo.serializer.read(buffer)
+        self.inc_depth()
+        o = typeinfo.serializer.read(buffer)
+        self.depth -= 1
+        return o
 
     cpdef inline xdeserialize_ref(self, Buffer buffer, Serializer serializer=None):
         cdef MapRefResolver ref_resolver
@@ -1160,7 +1155,24 @@ cdef class Fory:
             self, Buffer buffer, Serializer serializer=None):
         if serializer is None:
             serializer = self.type_resolver.read_typeinfo(buffer).serializer
-        return serializer.xread(buffer)
+        self.inc_depth()
+        o = serializer.xread(buffer)
+        self.depth -= 1
+        return o
+
+    cpdef inline inc_depth(self):
+        self.depth += 1
+        if self.depth > self.max_depth:
+            self.throw_depth_limit_exceeded_exception()
+
+    cpdef inline dec_depth(self):
+        self.depth -= 1
+
+    cpdef inline throw_depth_limit_exceeded_exception(self):
+        raise Exception(
+            f"Read depth exceed max depth: {self.depth}, the deserialization data may be malicious. If it's not malicious, "
+            "please increase max read depth by Fory(..., max_depth=...)"
+        )
 
     cpdef inline write_buffer_object(self, Buffer buffer, buffer_object):
         if self._buffer_callback is not None and self._buffer_callback(buffer_object):
@@ -1186,22 +1198,13 @@ cdef class Fory:
         buffer.reader_index += size
         return buf
 
-    cpdef inline handle_unsupported_write(self, Buffer buffer, obj):
+    cpdef handle_unsupported_write(self, buffer, obj):
         if self._unsupported_callback is None or self._unsupported_callback(obj):
-            buffer.write_bool(True)
-            self.pickler.dump(obj)
-        else:
-            buffer.write_bool(False)
+            raise NotImplementedError(f"{type(obj)} is not supported for write")
 
-    cpdef inline handle_unsupported_read(self, Buffer buffer):
-        cdef c_bool in_band = buffer.read_bool()
-        if in_band:
-            if self.unpickler is None:
-                self.unpickler.buffer = Unpickler(buffer)
-            return self.unpickler.load()
-        else:
-            assert self._unsupported_objects is not None
-            return next(self._unsupported_objects)
+    cpdef handle_unsupported_read(self, buffer):
+        assert self._unsupported_objects is not None
+        return next(self._unsupported_objects)
 
     cpdef inline write_ref_pyobject(
             self, Buffer buffer, value, TypeInfo typeinfo=None):
@@ -1219,7 +1222,9 @@ cdef class Fory:
             return ref_resolver.get_read_object()
         # indicates that the object is first read.
         cdef TypeInfo typeinfo = self.type_resolver.read_typeinfo(buffer)
+        self.inc_depth()
         o = typeinfo.serializer.read(buffer)
+        self.depth -= 1
         ref_resolver.set_read_object(ref_id, o)
         return o
 
@@ -1228,16 +1233,15 @@ cdef class Fory:
         self.type_resolver.reset_write()
         self.metastring_resolver.reset_write()
         self.serialization_context.reset_write()
-        self.pickler.clear_memo()
         self._unsupported_callback = None
 
     cpdef inline reset_read(self):
+        self.depth = 0
         self.ref_resolver.reset_read()
         self.type_resolver.reset_read()
         self.metastring_resolver.reset_read()
         self.serialization_context.reset_read()
         self._buffers = None
-        self.unpickler = None
         self._unsupported_objects = None
 
     cpdef inline reset(self):
@@ -1659,6 +1663,7 @@ cdef class CollectionSerializer(Serializer):
     cpdef _read_same_type_no_ref(self, Buffer buffer, int64_t len_, object collection_, TypeInfo typeinfo):
         cdef MapRefResolver ref_resolver = self.ref_resolver
         cdef TypeResolver type_resolver = self.type_resolver
+        self.fory.inc_depth()
         if self.is_py:
             for i in range(len_):
                 obj = typeinfo.serializer.read(buffer)
@@ -1667,6 +1672,7 @@ cdef class CollectionSerializer(Serializer):
             for i in range(len_):
                 obj = typeinfo.serializer.xread(buffer)
                 self._add_element(collection_, i, obj)
+        self.fory.dec_depth()
 
     cpdef _write_same_type_ref(self, Buffer buffer, value, TypeInfo typeinfo):
         cdef MapRefResolver ref_resolver = self.ref_resolver
@@ -1684,6 +1690,7 @@ cdef class CollectionSerializer(Serializer):
         cdef MapRefResolver ref_resolver = self.ref_resolver
         cdef TypeResolver type_resolver = self.type_resolver
         cdef c_bool is_py = self.is_py
+        self.fory.inc_depth()
         for i in range(len_):
             ref_id = ref_resolver.try_preserve_ref_id(buffer)
             if ref_id < NOT_NULL_VALUE_FLAG:
@@ -1695,6 +1702,7 @@ cdef class CollectionSerializer(Serializer):
                     obj = typeinfo.serializer.xread(buffer)
                 ref_resolver.set_read_object(ref_id, obj)
             self._add_element(collection_, i, obj)
+        self.fory.dec_depth()
 
     cpdef _add_element(self, object collection_, int64_t index, object element):
         raise NotImplementedError
@@ -1739,10 +1747,12 @@ cdef class ListSerializer(CollectionSerializer):
             else:
                 self._read_same_type_ref(buffer, len_, list_, typeinfo)
         else:
+            self.fory.inc_depth()
             for i in range(len_):
                 elem = get_next_element(buffer, ref_resolver, type_resolver, is_py)
                 Py_INCREF(elem)
                 PyList_SET_ITEM(list_, i, elem)
+            self.fory.dec_depth()
         return list_
 
     cpdef _add_element(self, object collection_, int64_t index, object element):
@@ -1823,10 +1833,12 @@ cdef class TupleSerializer(CollectionSerializer):
             else:
                 self._read_same_type_ref(buffer, len_, tuple_, typeinfo)
         else:
+            self.fory.inc_depth()
             for i in range(len_):
                 elem = get_next_element(buffer, ref_resolver, type_resolver, is_py)
                 Py_INCREF(elem)
                 PyTuple_SET_ITEM(tuple_, i, elem)
+            self.fory.dec_depth()
         return tuple_
 
     cpdef inline _add_element(self, object collection_, int64_t index, object element):
@@ -1882,6 +1894,7 @@ cdef class SetSerializer(CollectionSerializer):
             else:
                 self._read_same_type_ref(buffer, len_, instance, typeinfo)
         else:
+            self.fory.inc_depth()
             for i in range(len_):
                 ref_id = ref_resolver.try_preserve_ref_id(buffer)
                 if ref_id < NOT_NULL_VALUE_FLAG:
@@ -1905,6 +1918,7 @@ cdef class SetSerializer(CollectionSerializer):
                         o = typeinfo.serializer.xread(buffer)
                     ref_resolver.set_read_object(ref_id, o)
                     instance.add(o)
+            self.fory.dec_depth()
         return instance
 
     cpdef inline _add_element(self, object collection_, int64_t index, object element):
@@ -2139,6 +2153,7 @@ cdef class MapSerializer(Serializer):
         cdef type key_serializer_type, value_serializer_type
         cdef int32_t chunk_size
         cdef c_bool is_py = self.is_py
+        self.fory.inc_depth()
         while size > 0:
             while True:
                 key_has_null = (chunk_header & KEY_HAS_NULL) != 0
@@ -2194,6 +2209,7 @@ cdef class MapSerializer(Serializer):
                         map_[None] = None
                 size -= 1
                 if size == 0:
+                    self.fory.dec_depth()
                     return map_
                 else:
                     chunk_header = buffer.read_uint8()
@@ -2267,6 +2283,7 @@ cdef class MapSerializer(Serializer):
                 size -= 1
             if size != 0:
                 chunk_header = buffer.read_uint8()
+        self.fory.dec_depth()
         return map_
 
     cpdef inline xwrite(self, Buffer buffer, o):
@@ -2333,6 +2350,7 @@ cdef class SubMapSerializer(Serializer):
         cdef int32_t ref_id
         cdef TypeInfo key_typeinfo
         cdef TypeInfo value_typeinfo
+        self.fory.inc_depth()
         for i in range(len_):
             ref_id = ref_resolver.try_preserve_ref_id(buffer)
             if ref_id < NOT_NULL_VALUE_FLAG:
@@ -2362,6 +2380,7 @@ cdef class SubMapSerializer(Serializer):
                     value = value_typeinfo.serializer.read(buffer)
                     ref_resolver.set_read_object(ref_id, value)
             map_[key] = value
+        self.fory.dec_depth()
         return map_
 
 

@@ -18,7 +18,6 @@
 import enum
 import logging
 import os
-import warnings
 from abc import ABC, abstractmethod
 from typing import Union, Iterable, TypeVar
 
@@ -37,9 +36,6 @@ try:
 except ImportError:
     np = None
 
-from cloudpickle import Pickler
-
-from pickle import Unpickler
 
 logger = logging.getLogger(__name__)
 
@@ -105,14 +101,14 @@ class Fory:
         "serialization_context",
         "require_type_registration",
         "buffer",
-        "pickler",
-        "unpickler",
         "_buffer_callback",
         "_buffers",
         "metastring_resolver",
         "_unsupported_callback",
         "_unsupported_objects",
         "_peer_language",
+        "max_depth",
+        "depth",
     )
 
     def __init__(
@@ -121,6 +117,7 @@ class Fory:
         ref_tracking: bool = False,
         require_type_registration: bool = True,
         compatible: bool = False,
+        max_depth: int = 50,
     ):
         """
         :param require_type_registration:
@@ -134,6 +131,10 @@ class Fory:
         :param compatible:
          Whether to enable compatible mode for cross-language serialization.
          When enabled, type forward/backward compatibility for struct fields will be enabled.
+        :param max_depth:
+         The maximum depth of the deserialization data.
+         If the depth exceeds the maximum depth, an exception will be raised.
+         The default value is 50.
         """
         self.language = language
         self.is_py = language == Language.PYTHON
@@ -153,22 +154,13 @@ class Fory:
         self.type_resolver.initialize()
 
         self.buffer = Buffer.allocate(32)
-        if not require_type_registration:
-            warnings.warn(
-                "Type registration is disabled, unknown types can be deserialized which may be insecure.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            self.pickler = Pickler(self.buffer)
-            self.unpickler = None
-        else:
-            self.pickler = _PicklerStub()
-            self.unpickler = _UnpicklerStub()
         self._buffer_callback = None
         self._buffers = None
         self._unsupported_callback = None
         self._unsupported_objects = None
         self._peer_language = None
+        self.max_depth = max_depth
+        self.depth = 0
 
     def register(
         self,
@@ -228,9 +220,7 @@ class Fory:
     ) -> Union[Buffer, bytes]:
         self._buffer_callback = buffer_callback
         self._unsupported_callback = unsupported_callback
-        if buffer is not None:
-            self.pickler = Pickler(buffer)
-        else:
+        if buffer is None:
             self.buffer.writer_index = 0
             buffer = self.buffer
         if self.language == Language.XLANG:
@@ -417,7 +407,9 @@ class Fory:
         # indicates that the object is first read.
         if ref_id >= NOT_NULL_VALUE_FLAG:
             typeinfo = self.type_resolver.read_typeinfo(buffer)
+            self.inc_depth()
             o = typeinfo.serializer.read(buffer)
+            self.dec_depth()
             ref_resolver.set_read_object(ref_id, o)
             return o
         else:
@@ -426,7 +418,10 @@ class Fory:
     def deserialize_nonref(self, buffer):
         """Deserialize not-null and non-reference object from buffer."""
         typeinfo = self.type_resolver.read_typeinfo(buffer)
-        return typeinfo.serializer.read(buffer)
+        self.inc_depth()
+        o = typeinfo.serializer.read(buffer)
+        self.dec_depth()
+        return o
 
     def xdeserialize_ref(self, buffer, serializer=None):
         if serializer is None or serializer.need_to_write_ref:
@@ -447,7 +442,10 @@ class Fory:
     def xdeserialize_nonref(self, buffer, serializer=None):
         if serializer is None:
             serializer = self.type_resolver.read_typeinfo(buffer).serializer
-        return serializer.xread(buffer)
+        self.inc_depth()
+        o = serializer.xread(buffer)
+        self.dec_depth()
+        return o
 
     def write_buffer_object(self, buffer, buffer_object: BufferObject):
         if self._buffer_callback is None or self._buffer_callback(buffer_object):
@@ -476,21 +474,11 @@ class Fory:
 
     def handle_unsupported_write(self, buffer, obj):
         if self._unsupported_callback is None or self._unsupported_callback(obj):
-            buffer.write_bool(True)
-            self.pickler.dump(obj)
-        else:
-            buffer.write_bool(False)
+            raise NotImplementedError(f"{type(obj)} is not supported for write")
 
     def handle_unsupported_read(self, buffer):
-        in_band = buffer.read_bool()
-        if in_band:
-            unpickler = self.unpickler
-            if unpickler is None:
-                self.unpickler = unpickler = Unpickler(buffer)
-            return unpickler.load()
-        else:
-            assert self._unsupported_objects is not None
-            return next(self._unsupported_objects)
+        assert self._unsupported_objects is not None
+        return next(self._unsupported_objects)
 
     def write_ref_pyobject(self, buffer, value, typeinfo=None):
         if self.ref_resolver.write_ref_or_null(buffer, value):
@@ -508,16 +496,15 @@ class Fory:
         self.type_resolver.reset_write()
         self.serialization_context.reset_write()
         self.metastring_resolver.reset_write()
-        self.pickler.clear_memo()
         self._buffer_callback = None
         self._unsupported_callback = None
 
     def reset_read(self):
+        self.depth = 0
         self.ref_resolver.reset_read()
         self.type_resolver.reset_read()
         self.serialization_context.reset_read()
         self.metastring_resolver.reset_write()
-        self.unpickler = None
         self._buffers = None
         self._unsupported_objects = None
 
@@ -525,25 +512,22 @@ class Fory:
         self.reset_write()
         self.reset_read()
 
+    def inc_depth(self):
+        self.depth += 1
+        if self.depth > self.max_depth:
+            self.throw_depth_limit_exceeded_exception()
+
+    def dec_depth(self):
+        self.depth -= 1
+
+    def throw_depth_limit_exceeded_exception(self):
+        raise Exception(
+            f"Read depth exceed max depth: {self.depth}, the deserialization data may be malicious. If it's not malicious, "
+            "please increase max read depth by Fory(..., max_depth=...)"
+        )
+
 
 _ENABLE_TYPE_REGISTRATION_FORCIBLY = os.getenv("ENABLE_TYPE_REGISTRATION_FORCIBLY", "0") in {
     "1",
     "true",
 }
-
-
-class _PicklerStub:
-    def dump(self, o):
-        raise ValueError(
-            f"Type {type(o)} is not registered, "
-            f"pickle is not allowed when type registration enabled, "
-            f"Please register the type or pass unsupported_callback"
-        )
-
-    def clear_memo(self):
-        pass
-
-
-class _UnpicklerStub:
-    def load(self):
-        raise ValueError("pickle is not allowed when type registration enabled, Please register the type or pass unsupported_callback")

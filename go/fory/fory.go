@@ -321,10 +321,7 @@ func (f *Fory) WriteReferencable_(buffer *ByteBuffer, value reflect.Value) error
 }
 
 func (f *Fory) WriteReferencable(buffer *ByteBuffer, value reflect.Value) error {
-	if err := f.writeReferencableBySerializer(buffer, value, nil); err != nil {
-		return err
-	}
-	return nil
+    return f.writeNonReferencableBySerializer(buffer, value, nil)
 }
 
 func (f *Fory) writeReferencableBySerializer(buffer *ByteBuffer, value reflect.Value, serializer Serializer) error {

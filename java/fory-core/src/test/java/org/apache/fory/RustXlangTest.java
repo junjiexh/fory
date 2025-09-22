@@ -328,8 +328,22 @@ public class RustXlangTest extends ForyTestBase {
     }
   }
 
+  enum Color {
+    Green,
+    Red,
+    Blue,
+    White,
+  }
+
   private void testCrossLanguageSerializer(Language language, List<String> command)
       throws Exception {
+    List<String> strList = Arrays.asList("hello", "world");
+    Set<String> strSet = new HashSet<>(strList);
+    Map<String, String> strMap = new HashMap();
+    strMap.put("hello", "world");
+    strMap.put("foo", "bar");
+    Color color = Color.White;
+
     Fory fory =
         Fory.builder()
             .withLanguage(Language.XLANG)
@@ -338,6 +352,7 @@ public class RustXlangTest extends ForyTestBase {
             .withCompatibleMode(CompatibleMode.COMPATIBLE)
             .withWriteNumUtf16BytesForUtf8Encoding(false)
             .build();
+    fory.register(Color.class, 101);
     MemoryBuffer buffer = MemoryUtils.buffer(32);
     fory.serialize(buffer, true);
     fory.serialize(buffer, false);
@@ -364,15 +379,10 @@ public class RustXlangTest extends ForyTestBase {
     fory.serialize(buffer, new long[] {1, Long.MAX_VALUE});
     fory.serialize(buffer, new float[] {1.f, 2.f});
     fory.serialize(buffer, new double[] {1.0, 2.0});
-
-    List<String> strList = Arrays.asList("hello", "world");
     fory.serialize(buffer, strList);
-    Set<String> strSet = new HashSet<>(strList);
     fory.serialize(buffer, strSet);
-    HashMap<String, Integer> strMap = new HashMap();
-    strMap.put("hello", 42);
-    strMap.put("world", 666);
     fory.serialize(buffer, strMap);
+    fory.serialize(buffer, color);
     //    Map<Object, Object> map = new HashMap<>();
     //    for (int i = 0; i < list.size(); i++) {
     //        map.put("k" + i, list.get(i));
@@ -411,6 +421,7 @@ public class RustXlangTest extends ForyTestBase {
           assertStringEquals(fory.deserialize(buf), strList, useToString);
           assertStringEquals(fory.deserialize(buf), strSet, useToString);
           assertStringEquals(fory.deserialize(buf), strMap, useToString);
+          assertStringEquals(fory.deserialize(buf), color, useToString);
           //            assertStringEquals(fory.deserialize(buf), list, useToString);
           //            assertStringEquals(fory.deserialize(buf), map, useToString);
           //            assertStringEquals(fory.deserialize(buf), set, useToString);
@@ -425,8 +436,17 @@ public class RustXlangTest extends ForyTestBase {
   }
 
   @Data
+  static class Item {
+    String name;
+  }
+
+  @Data
   static class SimpleStruct {
-    int f2;
+    //        int f2;
+    Item f3;
+    String f4;
+    Color f5;
+    //        int last;
   }
 
   private void testSimpleStruct(Language language, List<String> command)
@@ -435,21 +455,30 @@ public class RustXlangTest extends ForyTestBase {
         Fory.builder()
             .withLanguage(Language.XLANG)
             .withRefTracking(false)
-            .requireClassRegistration(false)
             .withCompatibleMode(CompatibleMode.COMPATIBLE)
+            .withCodegen(false)
+            .withStringCompressed(true)
+            .withWriteNumUtf16BytesForUtf8Encoding(false)
             .build();
-    fory.register(SimpleStruct.class, 100);
+    fory.register(Color.class, 101);
+    fory.register(Item.class, 102);
+    fory.register(SimpleStruct.class, 103);
+    Item item = new Item();
+    item.name = "item";
     SimpleStruct obj = new SimpleStruct();
-    obj.f2 = 20;
+    //    obj.f2 = 10;
+    obj.f3 = item;
+    obj.f4 = "f3";
+    obj.f5 = Color.White;
+    //    obj.last = 42;
     byte[] serialized = fory.serialize(obj);
-    //      Assert.assertEquals(fory.deserialize(serialized), obj);
-    //        System.out.println(Arrays.toString(serialized));
-    //        Path dataFile = Files.createTempFile("test_simple_struct", "data");
-    //        Pair<Map<String,String>, File> env_workdir = setFilePath(language, command, dataFile,
-    //    serialized);
-    //        Assert.assertTrue(executeCommand(command, 30, env_workdir.getLeft(),
-    //    env_workdir.getRight()));
-    //            Assert.assertEquals(fory.deserialize(Files.readAllBytes(dataFile)), obj);
+    Assert.assertEquals(fory.deserialize(serialized), obj);
+    System.out.println(Arrays.toString(serialized));
+    Path dataFile = Files.createTempFile("test_simple_struct", "data");
+    Pair<Map<String, String>, File> env_workdir =
+        setFilePath(language, command, dataFile, serialized);
+    Assert.assertTrue(executeCommand(command, 30, env_workdir.getLeft(), env_workdir.getRight()));
+    Assert.assertEquals(fory.deserialize(Files.readAllBytes(dataFile)), obj);
   }
 
   /**
