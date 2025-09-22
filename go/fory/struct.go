@@ -160,24 +160,25 @@ func createStructFieldInfos(f *Fory, type_ reflect.Type) (structFieldsInfo, erro
 		if field.Type.Kind() == reflect.Interface {
 			field.Type = reflect.ValueOf(field.Type).Elem().Type()
 		}
-		fieldSerializer, _ := f.typeResolver.getSerializerByType(field.Type, true)
-		if field.Type.Kind() == reflect.Array {
-			// When a struct field is an array type,
-			// retrieve its corresponding slice serializer and populate it into fieldInfo for reuse.
-			elemType := field.Type.Elem()
-			sliceType := reflect.SliceOf(elemType)
-			fieldSerializer = f.typeResolver.typeToSerializers[sliceType]
-		} else if field.Type.Kind() == reflect.Slice {
-			// If the field is a concrete slice type, dynamically create a valid serializer
-			// so it has the potential and capability to use readSameTypes function.
-			if field.Type.Elem().Kind() != reflect.Interface {
-				fieldSerializer = sliceSerializer{
-					f.typeResolver.typesInfo[field.Type.Elem()],
+		var fieldSerializer Serializer
+		if field.Type.Kind() != reflect.Struct {
+			var _ error
+			fieldSerializer, _ = f.typeResolver.getSerializerByType(field.Type, true)
+			if field.Type.Kind() == reflect.Array {
+				// When a struct field is an array type,
+				// retrieve its corresponding slice serializer and populate it into fieldInfo for reuse.
+				elemType := field.Type.Elem()
+				sliceType := reflect.SliceOf(elemType)
+				fieldSerializer = f.typeResolver.typeToSerializers[sliceType]
+			} else if field.Type.Kind() == reflect.Slice {
+				// If the field is a concrete slice type, dynamically create a valid serializer
+				// so it has the potential and capability to use readSameTypes function.
+				if field.Type.Elem().Kind() != reflect.Interface {
+					fieldSerializer = sliceSerializer{
+						f.typeResolver.typesInfo[field.Type.Elem()],
+					}
 				}
 			}
-		}
-		if field.Type.Kind() == reflect.Struct {
-			fieldSerializer = nil
 		}
 		f := fieldInfo{
 			name:         SnakeCase(field.Name), // TODO field name to lower case
