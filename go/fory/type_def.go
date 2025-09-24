@@ -165,7 +165,7 @@ func buildFieldDefs(fory *Fory, value reflect.Value) ([]FieldDef, error) {
 		serializers := make([]Serializer, len(fieldDefs))
 		fieldNames := make([]string, len(fieldDefs))
 		for i, fieldDef := range fieldDefs {
-			serializer, err := fieldDef.fieldType.getSerializer(fory)
+			serializer, err := getFieldTypeSerializer(fory, fieldDef.fieldType)
 			if err != nil {
 				// If we can't get serializer, use nil (will be handled by sortFields)
 				serializers[i] = nil
@@ -199,7 +199,6 @@ func buildFieldDefs(fory *Fory, value reflect.Value) ([]FieldDef, error) {
 type FieldType interface {
 	TypeId() TypeId
 	write(*ByteBuffer)
-	getSerializer(*Fory) (Serializer, error)
 	getTypeInfo(*Fory) (TypeInfo, error) // some serializer need typeinfo as well
 }
 
@@ -213,8 +212,8 @@ func (b *BaseFieldType) write(buffer *ByteBuffer) {
 	buffer.WriteVarUint32Small7(uint32(b.typeId))
 }
 
-func (b *BaseFieldType) getSerializer(fory *Fory) (Serializer, error) {
-	typeInfo, err := b.getTypeInfo(fory)
+func getFieldTypeSerializer(fory *Fory, ft FieldType) (Serializer, error) {
+	typeInfo, err := ft.getTypeInfo(fory)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +283,7 @@ func (c *CollectionFieldType) getTypeInfo(f *Fory) (TypeInfo, error) {
 	if err != nil {
 		return TypeInfo{}, err
 	}
-	sliceSerializer := &sliceSerializer{elemInfo: elemInfo}
+	sliceSerializer := &sliceSerializer{elemInfo: elemInfo, declaredType: elemInfo.Type}
 	return TypeInfo{Type: collectionType, Serializer: sliceSerializer}, nil
 }
 

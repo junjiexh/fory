@@ -804,7 +804,7 @@ func (r *typeResolver) writeSharedTypeMeta(buffer *ByteBuffer, typeInfo TypeInfo
 	buffer.WriteVarUint32(newIndex)
 	context.typeMap[typ] = newIndex
 
-	typeDef, err := r.getOrCreateTypeDef(typeInfo.Type)
+	typeDef, err := r.getTypeDef(typeInfo.Type, true)
 	if err != nil {
 		return err
 	}
@@ -812,9 +812,13 @@ func (r *typeResolver) writeSharedTypeMeta(buffer *ByteBuffer, typeInfo TypeInfo
 	return nil
 }
 
-func (r *typeResolver) getOrCreateTypeDef(typ reflect.Type) (*TypeDef, error) {
+func (r *typeResolver) getTypeDef(typ reflect.Type, create bool) (*TypeDef, error) {
 	if existingTypeDef, exists := r.typeToTypeDef[typ]; exists {
 		return existingTypeDef, nil
+	}
+
+	if !create {
+		return nil, fmt.Errorf("TypeDef not found for type %s", typ)
 	}
 
 	zero := reflect.Zero(typ)

@@ -374,7 +374,20 @@ func (f *Fory) writeValue(buffer *ByteBuffer, value reflect.Value, serializer Se
 	if err != nil {
 		return fmt.Errorf("cannot write typeinfo for value %v: %v", value, err)
 	}
-	serializer = typeInfo.Serializer
+	// if compatible mode enable, use declared serializer to write value
+	if IsNamespacedType(TypeId(typeInfo.TypeID)) && f.compatible {
+		if declaredTypeDef, err := f.typeResolver.getTypeDef(typeInfo.Type, false); err != nil {
+			return err
+		} else {
+			ti, err := declaredTypeDef.buildTypeInfo()
+			if err != nil {
+				return err
+			}
+			serializer = ti.Serializer
+		}
+	} else {
+		serializer = typeInfo.Serializer
+	}
 	// Serialize the actual value using the serializer
 	return serializer.Write(f, buffer, value)
 }

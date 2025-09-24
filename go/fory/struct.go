@@ -44,6 +44,28 @@ func (s *structSerializer) NeedWriteRef() bool {
 	return true
 }
 
+func (s *structSerializer) ensureFieldsInfo(f *Fory, fallbackType reflect.Type) error {
+	if s.fieldsInfo != nil {
+		return nil
+	}
+
+	var (
+		infos structFieldsInfo
+		err   error
+	)
+	if len(s.fieldDefs) == 0 {
+		infos, err = createStructFieldInfos(f, s.type_)
+	} else {
+		infos, err = createStructFieldInfosFromFieldDefs(f, s.fieldDefs, fallbackType)
+	}
+	if err != nil {
+		return err
+	}
+
+	s.fieldsInfo = infos
+	return nil
+}
+
 func (s *structSerializer) Write(f *Fory, buf *ByteBuffer, value reflect.Value) error {
 	// If we have a codegen delegate, use it for optimal performance
 	if s.codegenDelegate != nil {
@@ -51,13 +73,8 @@ func (s *structSerializer) Write(f *Fory, buf *ByteBuffer, value reflect.Value) 
 	}
 
 	// Fall back to reflection-based serialization
-	// TODO support fields back and forward compatible. need to serialize fields name too.
-	if s.fieldsInfo == nil {
-		if fieldsInfo, err := createStructFieldInfos(f, s.type_); err != nil {
-			return err
-		} else {
-			s.fieldsInfo = fieldsInfo
-		}
+	if err := s.ensureFieldsInfo(f, value.Type()); err != nil {
+		return err
 	}
 	if s.structHash == 0 {
 		if hash, err := computeStructHash(s.fieldsInfo, f.typeResolver); err != nil {
@@ -99,22 +116,8 @@ func (s *structSerializer) Read(f *Fory, buf *ByteBuffer, type_ reflect.Type, va
 		}
 		value = value.Elem()
 	}
-	if s.fieldsInfo == nil {
-		if len(s.fieldDefs) == 0 {
-			// Normal case: create from reflection
-			if infos, err := createStructFieldInfos(f, s.type_); err != nil {
-				return err
-			} else {
-				s.fieldsInfo = infos
-			}
-		} else {
-			// Create from fieldDefs for forward/backward compatibility
-			if infos, err := createStructFieldInfosFromFieldDefs(f, s.fieldDefs, type_); err != nil {
-				return err
-			} else {
-				s.fieldsInfo = infos
-			}
-		}
+	if err := s.ensureFieldsInfo(f, type_); err != nil {
+		return err
 	}
 	if s.structHash == 0 {
 		if hash, err := computeStructHash(s.fieldsInfo, f.typeResolver); err != nil {
@@ -188,7 +191,7 @@ func createStructFieldInfos(f *Fory, type_ reflect.Type) (structFieldsInfo, erro
 				// so it has the potential and capability to use readSameTypes function.
 				if field.Type.Elem().Kind() != reflect.Interface {
 					fieldSerializer = sliceSerializer{
-						f.typeResolver.typesInfo[field.Type.Elem()],
+						elemInfo: f.typeResolver.typesInfo[field.Type.Elem()],
 					}
 				}
 			}
@@ -280,7 +283,7 @@ func createStructFieldInfosFromFieldDefs(f *Fory, fieldDefs []FieldDef, type_ re
 			fieldType = fieldTypeFromDef
 		}
 
-		fieldSerializer, err := def.fieldType.getSerializer(f)
+		fieldSerializer, err := getFieldTypeSerializer(f, def.fieldType)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get serializer for field %s: %w", def.name, err)
 		}
