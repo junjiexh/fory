@@ -119,7 +119,7 @@ func (s setSerializer) writeHeader(f *Fory, buf *ByteBuffer, keys []reflect.Valu
 	buf.WriteInt8(int8(collectFlag))      // Collection flags
 
 	// Write element type ID if all elements have same type
-	if !hasSameType {
+	if hasSameType {
 		buf.WriteVarInt32(elemTypeInfo.TypeID)
 	}
 
