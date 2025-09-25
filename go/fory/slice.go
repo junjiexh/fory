@@ -31,6 +31,8 @@ const (
 	CollectionDeclSameType      = CollectionIsSameType | CollectionIsDeclElementType
 )
 
+// sliceSerializer provides the dynamic slice implementation(e.g. []interface{}) that inspects
+// element values at runtime
 type sliceSerializer struct {
 	elemInfo     TypeInfo
 	declaredType reflect.Type
@@ -69,9 +71,16 @@ func (s sliceSerializer) Write(f *Fory, buf *ByteBuffer, value reflect.Value) er
 // - Element type information (if homogeneous)
 func (s sliceSerializer) writeHeader(f *Fory, buf *ByteBuffer, value reflect.Value) (byte, TypeInfo) {
 	collectFlag := CollectionDefaultFlag
-	elemTypeInfo := s.elemInfo
+	var elemTypeInfo TypeInfo
 	hasNull := false
 	hasSameType := true
+
+	// Seed elemTypeInfo from the first element so writeSameType can reuse it.
+	// Empty slices leave elemTypeInfo zero-value, which is also fine because
+	// writeSameType won't do anything in that case.
+	if value.Len() > 0 {
+		elemTypeInfo, _ = f.typeResolver.getTypeInfo(value.Index(0), true)
+	}
 
 	if s.declaredType != nil {
 		collectFlag |= CollectionIsDeclElementType | CollectionIsSameType
@@ -107,8 +116,8 @@ func (s sliceSerializer) writeHeader(f *Fory, buf *ByteBuffer, value reflect.Val
 		collectFlag |= CollectionIsSameType // Mark if elements have same types
 	}
 
-	// Enable reference tracking if configured
-	if f.refTracking {
+	// Enable reference tracking if configured and element type supports it
+	if f.refTracking && (elemTypeInfo.Serializer == nil || elemTypeInfo.Serializer.NeedWriteRef()) {
 		collectFlag |= CollectionTrackingRef
 	}
 
@@ -226,7 +235,11 @@ func (s sliceSerializer) Read(f *Fory, buf *ByteBuffer, type_ reflect.Type, valu
 	if (collectFlag & CollectionIsSameType) != 0 {
 		if (collectFlag & CollectionIsDeclElementType) == 0 {
 			typeID := buf.ReadVarInt32()
-			elemTypeInfo, _ = f.typeResolver.getTypeInfoById(int16(typeID))
+			var err error
+			elemTypeInfo, err = f.typeResolver.getTypeInfoById(int16(typeID))
+			if err != nil {
+				elemTypeInfo = s.elemInfo
+			}
 		} else {
 			elemTypeInfo = s.elemInfo
 		}
