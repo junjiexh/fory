@@ -398,13 +398,20 @@ func buildFieldType(fory *Fory, fieldValue reflect.Value) (FieldType, error) {
 		return NewMapFieldType(MAP, keyFieldType, valueFieldType), nil
 	}
 
-	// For all other types, get the type ID and treat as ObjectFieldType
 	var typeId TypeId
 	typeInfo, err := fory.typeResolver.getTypeInfo(fieldValue, true)
 	if err != nil {
 		return nil, err
 	}
 	typeId = TypeId(typeInfo.TypeID)
+
+	if typeId < 0 {
+		typeId = -typeId // restore pointer type id
+	}
+
+	if typeId < 0 {
+		typeId = -typeId // restore pointer type id
+	}
 
 	if typeId == EXT || typeId == STRUCT || typeId == NAMED_STRUCT ||
 		typeId == COMPATIBLE_STRUCT || typeId == NAMED_COMPATIBLE_STRUCT {

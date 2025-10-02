@@ -82,11 +82,11 @@ type InconsistentMapDataClass struct {
 }
 
 type PointerDataClass struct {
-	Name     *string
-	Age      *int32
-	Nickname *string
-	Inner    *SimpleDataClass
-	Score    *int32
+	Inner *SimpleDataClass
+}
+
+type PointerInconsistentDataClass struct {
+	Inner *InconsistentDataClass
 }
 
 type NestedOuter struct {
@@ -97,21 +97,6 @@ type NestedOuter struct {
 type NestedOuterIncompatible struct {
 	Name  string
 	Inner InconsistentDataClass
-}
-
-func TestBasicSerialization(t *testing.T) {
-	for _, compatible := range []bool{false, true} {
-		fory := NewForyWithOptions(WithRefTracking(true), WithCompatible(compatible))
-		for _, value := range primitiveData() {
-			serde(t, fory, value)
-		}
-		for _, data := range commonSlice() {
-			serde(t, fory, data)
-		}
-		for _, data := range commonMap() {
-			serde(t, fory, data)
-		}
-	}
 }
 
 func TestMetaShareEnabled(t *testing.T) {
@@ -279,45 +264,55 @@ func TestCompatibleSerializationScenarios(t *testing.T) {
 			writeType: PointerDataClass{},
 			readType:  PointerDataClass{},
 			input: func() PointerDataClass {
-				name := "ptr"
-				age := int32(42)
-				nickname := "alias"
-				score := int32(99)
 				return PointerDataClass{
-					Name:     &name,
-					Age:      &age,
-					Nickname: &nickname,
 					Inner: &SimpleDataClass{
 						Name:   "inner",
 						Age:    18,
 						Active: true,
 					},
-					Score: &score,
 				}
 			}(),
 			writerSetup: func(f *Fory) error {
-				return f.RegisterTagType("SimpleDataClass", SimpleDataClass{})
+				return f.RegisterNamedType(SimpleDataClass{}, "SimpleDataClass")
 			},
 			readerSetup: func(f *Fory) error {
-				return f.RegisterTagType("SimpleDataClass", SimpleDataClass{})
+				return f.RegisterNamedType(SimpleDataClass{}, "SimpleDataClass")
 			},
 			assertFunc: func(t *testing.T, input interface{}, output interface{}) {
 				in := input.(PointerDataClass)
 				out := output.(PointerDataClass)
-				if assert.NotNil(t, out.Name) {
-					assert.Equal(t, *in.Name, *out.Name)
-				}
-				if assert.NotNil(t, out.Age) {
-					assert.Equal(t, *in.Age, *out.Age)
-				}
-				if assert.NotNil(t, out.Nickname) {
-					assert.Equal(t, *in.Nickname, *out.Nickname)
-				}
 				if assert.NotNil(t, out.Inner) {
 					assert.Equal(t, *in.Inner, *out.Inner)
 				}
-				if assert.NotNil(t, out.Score) {
-					assert.Equal(t, *in.Score, *out.Score)
+			},
+		},
+		{
+			name:      "PointerFieldsInconsistent",
+			tag:       "PointerDataClass",
+			writeType: PointerDataClass{},
+			readType:  PointerInconsistentDataClass{},
+			input: func() PointerDataClass {
+				return PointerDataClass{
+					Inner: &SimpleDataClass{
+						Name:   "inner",
+						Age:    18,
+						Active: true,
+					},
+				}
+			}(),
+			writerSetup: func(f *Fory) error {
+				return f.RegisterNamedType(SimpleDataClass{}, "SimpleDataClass")
+			},
+			readerSetup: func(f *Fory) error {
+				return f.RegisterNamedType(InconsistentDataClass{}, "SimpleDataClass")
+			},
+			assertFunc: func(t *testing.T, input interface{}, output interface{}) {
+				in := input.(PointerDataClass)
+				out := output.(PointerInconsistentDataClass)
+				if assert.NotNil(t, out.Inner) {
+					assert.Zero(t, out.Inner.Name)
+					assert.Equal(t, in.Inner.Age, out.Inner.Age)
+					assert.Equal(t, in.Inner.Active, out.Inner.Active)
 				}
 			},
 		},

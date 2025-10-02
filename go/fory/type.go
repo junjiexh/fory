@@ -863,6 +863,10 @@ func (r *typeResolver) getTypeDef(typ reflect.Type, create bool) (*TypeDef, erro
 		return nil, fmt.Errorf("TypeDef not found for type %s", typ)
 	}
 
+	// don't create TypeDef for pointer types, we create TypeDef for its element type instead.
+	if typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
 	zero := reflect.Zero(typ)
 	typeDef, err := buildTypeDef(r.fory, zero)
 	if err != nil {

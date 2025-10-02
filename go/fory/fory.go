@@ -245,17 +245,8 @@ func (f *Fory) Serialize(buf *ByteBuffer, v interface{}, callback BufferCallback
 		if err := buffer.WriteByte(GO); err != nil {
 			return err
 		}
-		typeDefsOffset := -1
-		if f.compatible {
-			typeDefsOffset = buffer.writerIndex
-			buffer.WriteInt32(-1)
-		}
 		if err := f.Write(buffer, v); err != nil {
 			return err
-		}
-		if f.compatible && f.metaContext != nil && len(f.metaContext.writingTypeDefs) > 0 {
-			buffer.PutInt32(typeDefsOffset, int32(buffer.writerIndex-typeDefsOffset-4))
-			f.typeResolver.writeTypeDefs(buffer)
 		}
 	}
 	return nil
@@ -275,7 +266,7 @@ func (f *Fory) Write(buffer *ByteBuffer, v interface{}) (err error) {
 	case byte: // uint8
 		f.WriteByte_(buffer, v)
 	default:
-		err = f.WriteReferencable(buffer, reflect.ValueOf(v))
+		err = f.WriteReferencable_(buffer, reflect.ValueOf(v))
 	}
 	return
 }
@@ -332,6 +323,22 @@ func (f *Fory) writeLength(buffer *ByteBuffer, value int) error {
 
 func (f *Fory) readLength(buffer *ByteBuffer) int {
 	return int(buffer.ReadVarInt32())
+}
+
+func (f *Fory) WriteReferencable_(buffer *ByteBuffer, value reflect.Value) error {
+	metaOffset := buffer.writerIndex
+	if f.compatible {
+		buffer.WriteInt32(-1)
+	}
+	err := f.WriteReferencable(buffer, value)
+	if err != nil {
+		return err
+	}
+	if f.compatible && f.metaContext != nil && len(f.metaContext.writingTypeDefs) > 0 {
+		buffer.PutInt32(metaOffset, int32(buffer.writerIndex-metaOffset-4))
+		f.typeResolver.writeTypeDefs(buffer)
+	}
+	return nil
 }
 
 func (f *Fory) WriteReferencable(buffer *ByteBuffer, value reflect.Value) error {
@@ -537,6 +544,13 @@ func (f *Fory) readData(buffer *ByteBuffer, value reflect.Value, serializer Seri
 			return fmt.Errorf("read typeinfo failed: %w", err)
 		}
 		serializer = typeInfo.Serializer
+		// if value is a pointer to struct, convert to ptrToStructSerializer
+		if value.Kind() == reflect.Ptr && IsNamespacedType(serializer.TypeId()) {
+			serializer = &ptrToStructSerializer{
+				type_:            value.Type().Elem(),
+				structSerializer: *serializer.(*structSerializer),
+			}
+		}
 		var concrete reflect.Value
 		var type_ reflect.Type
 		/*
