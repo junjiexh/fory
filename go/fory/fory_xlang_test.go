@@ -228,7 +228,7 @@ func TestSerializeSimpleStruct(t *testing.T) {
 	// Temporarily disabled
 	// t.Skip()
 	fory_ := fory.NewFory(true)
-	require.Nil(t, fory_.RegisterTagType("test.ComplexObject2", ComplexObject2{}))
+	require.Nil(t, fory_.Register(ComplexObject2{}, "test.ComplexObject2"))
 	obj2 := ComplexObject2{}
 	obj2.F1 = true
 	obj2.F2 = map[int8]int32{-1: 2}
@@ -239,8 +239,8 @@ func TestSerializeComplexStruct(t *testing.T) {
 	// Temporarily disabled
 	// t.Skip()
 	fory_ := fory.NewFory(true)
-	require.Nil(t, fory_.RegisterTagType("test.ComplexObject1", ComplexObject1{}))
-	require.Nil(t, fory_.RegisterTagType("test.ComplexObject2", ComplexObject2{}))
+	require.Nil(t, fory_.Register(ComplexObject1{}, "test.ComplexObject1"))
+	require.Nil(t, fory_.Register(ComplexObject2{}, "test.ComplexObject2"))
 	obj2 := ComplexObject2{}
 	obj2.F1 = true
 	obj2.F2 = map[int8]int32{-1: 2}
