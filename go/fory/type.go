@@ -184,6 +184,7 @@ var namedTypes = map[TypeId]struct{}{
 
 // IsNamespacedType checks whether the given type ID is a namespace type
 func IsNamespacedType(typeID TypeId) bool {
+	typeID = typeID & 0xFF
 	_, exists := namedTypes[typeID]
 	return exists
 }
@@ -481,17 +482,25 @@ func (r *typeResolver) RegisterSerializer(type_ reflect.Type, s Serializer) erro
 
 func (r *typeResolver) RegisterNamedType(
 	type_ reflect.Type,
+	typeId int32,
 	namespace string,
 	typeName string,
 ) error {
 	if prev, ok := r.typeToSerializers[type_]; ok {
 		return fmt.Errorf("type %s already has a serializer %s registered", type_, prev)
 	}
+	registerById := (typeId != 0)
+	if registerById && typeName != "" {
+		return fmt.Errorf("typename %s and typeId %d cannot be both register", typeName, typeId)
+	}
 	if namespace == "" {
 		if idx := strings.LastIndex(typeName, "."); idx != -1 {
 			namespace = typeName[:idx]
 			typeName = typeName[idx+1:]
 		}
+	}
+	if typeName == "" && namespace != "" {
+		return fmt.Errorf("typeName cannot be empty if namespace is provided")
 	}
 	var tag string
 	if namespace == "" {
@@ -514,11 +523,23 @@ func (r *typeResolver) RegisterNamedType(
 	r.typeTagToSerializers[tag] = ptrSerializer
 	r.typeToTypeInfo[ptrType] = "*@" + tag
 	r.typeInfoToType["*@"+tag] = ptrType
-	var typeId int32
-	if r.metaShareEnabled() {
-		typeId = NAMED_COMPATIBLE_STRUCT
+	if typeId == 0 {
+		if r.metaShareEnabled() {
+			typeId = (typeId << 8) + NAMED_COMPATIBLE_STRUCT
+		} else {
+			typeId = (typeId << 8) + NAMED_STRUCT
+		}
 	} else {
-		typeId = NAMED_STRUCT
+		if r.metaShareEnabled() {
+			typeId = COMPATIBLE_STRUCT
+		} else {
+			typeId = STRUCT
+		}
+	}
+	if registerById {
+		if info, ok := r.typeIDToTypeInfo[typeId]; ok {
+			return fmt.Errorf("type %s with id %d has been registered", info.Type, typeId)
+		}
 	}
 	// For named structs, directly register both their value and pointer types
 	_, err := r.registerType(type_, typeId, namespace, typeName, nil, false)

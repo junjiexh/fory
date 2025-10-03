@@ -222,7 +222,7 @@ func TestSerializeStructSimple(t *testing.T) {
 		type A struct {
 			F1 []string
 		}
-		require.Nil(t, fory.Register(A{}, "example.A"))
+		require.Nil(t, fory.RegisterNamedType(A{}, "example.A"))
 		serde(t, fory, A{})
 		serde(t, fory, &A{})
 		serde(t, fory, A{F1: []string{"str1", "", "str2"}})
@@ -232,7 +232,7 @@ func TestSerializeStructSimple(t *testing.T) {
 			F1 []string
 			F2 map[string]int32
 		}
-		require.Nil(t, fory.Register(B{}, "example.B"))
+		require.Nil(t, fory.RegisterNamedType(B{}, "example.B"))
 		serde(t, fory, B{})
 		serde(t, fory, B{
 			F1: []string{"str1", "", "str2"},
@@ -242,6 +242,15 @@ func TestSerializeStructSimple(t *testing.T) {
 			},
 		})
 	}
+}
+
+func TestRegisterById(t *testing.T) {
+	fory := NewFory(false)
+	type simple struct {
+		Field string
+	}
+	require.NoError(t, fory.Register(simple{}, 100))
+	serde(t, fory, simple{Field: "value"})
 }
 
 func TestSerializeBeginWithMagicNumber(t *testing.T) {
@@ -292,7 +301,7 @@ func newFoo() Foo {
 func TestSerializeStruct(t *testing.T) {
 	for _, referenceTracking := range []bool{false, true} {
 		fory := NewFory(referenceTracking)
-		require.Nil(t, fory.Register(Bar{}, "example.Bar"))
+		require.Nil(t, fory.RegisterNamedType(Bar{}, "example.Bar"))
 		serde(t, fory, &Bar{})
 		bar := Bar{F1: 1, F2: "str"}
 		serde(t, fory, bar)
@@ -302,13 +311,13 @@ func TestSerializeStruct(t *testing.T) {
 			F1 Bar
 			F2 interface{}
 		}
-		require.Nil(t, fory.Register(A{}, "example.A"))
+		require.Nil(t, fory.RegisterNamedType(A{}, "example.A"))
 		serde(t, fory, A{})
 		serde(t, fory, &A{})
 		serde(t, fory, A{F1: Bar{F1: 1, F2: "str"}, F2: -1})
 		serde(t, fory, &A{F1: Bar{F1: 1, F2: "str"}, F2: -1})
 
-		require.Nil(t, fory.Register(Foo{}, "example.Foo"))
+		require.Nil(t, fory.RegisterNamedType(Foo{}, "example.Foo"))
 		foo := newFoo()
 		serde(t, fory, foo)
 		serde(t, fory, &foo)
@@ -321,7 +330,7 @@ func TestSerializeCircularReference(t *testing.T) {
 		type A struct {
 			A1 *A
 		}
-		require.Nil(t, fory.Register(A{}, "example.A"))
+		require.Nil(t, fory.RegisterNamedType(A{}, "example.A"))
 		// If use `A{}` instead of `&A{}` and pass `a` instead of `&a`, there will be serialization data duplication
 		// and can't be deserialized by other languages too.
 		// TODO(chaokunyang) If pass by value(have a copy) and there are some inner value reference, return a readable
@@ -341,7 +350,7 @@ func TestSerializeCircularReference(t *testing.T) {
 			F2 *B
 			F3 *B
 		}
-		require.Nil(t, fory.Register(B{}, "example.B"))
+		require.Nil(t, fory.RegisterNamedType(B{}, "example.B"))
 		b := &B{F1: "str"}
 		b.F2 = b
 		b.F3 = b
@@ -369,8 +378,8 @@ func TestSerializeComplexReference(t *testing.T) {
 		F3 *A
 		F4 *B
 	}
-	require.Nil(t, fory.Register(A{}, "example.A"))
-	require.Nil(t, fory.Register(B{}, "example.B"))
+	require.Nil(t, fory.RegisterNamedType(A{}, "example.A"))
+	require.Nil(t, fory.RegisterNamedType(B{}, "example.B"))
 
 	a := &A{F1: "str"}
 	a.F2 = a
@@ -485,8 +494,8 @@ func serde(t *testing.T, fory *Fory, value interface{}) {
 
 func BenchmarkMarshal(b *testing.B) {
 	fory := NewFory(true)
-	require.Nil(b, fory.Register(Foo{}, "example.Foo"))
-	require.Nil(b, fory.Register(Bar{}, "example.Bar"))
+	require.Nil(b, fory.RegisterNamedType(Foo{}, "example.Foo"))
+	require.Nil(b, fory.RegisterNamedType(Bar{}, "example.Bar"))
 	value := benchData()
 	for i := 0; i < b.N; i++ {
 		_, err := fory.Marshal(value)
@@ -498,8 +507,8 @@ func BenchmarkMarshal(b *testing.B) {
 
 func BenchmarkUnmarshal(b *testing.B) {
 	fory := NewFory(true)
-	require.Nil(b, fory.Register(Foo{}, "example.Foo"))
-	require.Nil(b, fory.Register(Bar{}, "example.Bar"))
+	require.Nil(b, fory.RegisterNamedType(Foo{}, "example.Foo"))
+	require.Nil(b, fory.RegisterNamedType(Bar{}, "example.Bar"))
 	value := benchData()
 	data, err := fory.Marshal(value)
 	if err != nil {
@@ -611,10 +620,10 @@ func TestStructWithNestedSlice(t *testing.T) {
 	}
 
 	fory := NewFory(true)
-	if err := fory.Register(Example{}, "Example"); err != nil {
+	if err := fory.RegisterNamedType(Example{}, "Example"); err != nil {
 		panic(err)
 	}
-	if err := fory.Register(Item{}, "Item"); err != nil {
+	if err := fory.RegisterNamedType(Item{}, "Item"); err != nil {
 		panic(err)
 	}
 

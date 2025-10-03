@@ -289,10 +289,10 @@ func main() {
   F2 map[int8]int32
  }
  fory := forygo.NewFory()
- if err := fory.Register(SomeClass1{}, "example.SomeClass1"); err != nil {
+ if err := fory.RegisterNamedType(SomeClass1{}, "example.SomeClass1"); err != nil {
   panic(err)
  }
- if err := fory.Register(SomeClass2{}, "example.SomeClass2"); err != nil {
+ if err := fory.RegisterNamedType(SomeClass2{}, "example.SomeClass2"); err != nil {
   panic(err)
  }
  obj1 := &SomeClass1{}
