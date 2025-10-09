@@ -481,7 +481,7 @@ func main() {
   F3 map[string]string
  }
  fory := forygo.NewFory(true)
- if err := fory.Register(SomeClass{}, "example.SomeClass"); err != nil {
+ if err := fory.Register(SomeClass{}, 65); err != nil {
   panic(err)
  }
  value := &SomeClass{F2: map[string]string{"k1": "v1", "k2": "v2"}}

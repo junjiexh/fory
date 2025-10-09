@@ -206,7 +206,7 @@ Choose the right registration approach for your use case:
 
 ```go
 // Register using an explicit namespace and type name pair.
-func (f *Fory) RegisterType(User{}, "example", "user") error
+func (f *Fory) RegisterByNamespace(User{}, "example", "user") error
 
 // Register using a name
 func (f *Fory) RegisterNamedType(User{}, "example.user") error
