@@ -665,7 +665,7 @@ func (r *typeResolver) getTypeInfo(value reflect.Value, create bool) (TypeInfo, 
 		typeID = -NAMED_STRUCT
 	} else if value.Kind() == reflect.Map {
 		typeID = MAP
-	} else if value.Kind() == reflect.Array || value.Kind() == reflect.Slice {
+	} else if value.Kind() == reflect.Array {
 		type_ = reflect.SliceOf(type_.Elem())
 		return r.typesInfo[type_], nil
 	} else if isMultiDimensionaSlice(value) {
@@ -878,13 +878,27 @@ func (r *typeResolver) getTypeDef(typ reflect.Type, create bool) (*TypeDef, erro
 	return typeDef, nil
 }
 
-func (r *typeResolver) readSharedTypeMeta(buffer *ByteBuffer) (TypeInfo, error) {
+func (r *typeResolver) readSharedTypeMeta(buffer *ByteBuffer, value reflect.Value) (TypeInfo, error) {
 	context := r.fory.metaContext
 	index := buffer.ReadVarInt32() // shared meta index id
 	if index < 0 || index >= int32(len(context.readTypeInfos)) {
 		return TypeInfo{}, fmt.Errorf("TypeInfo not found for index %d", index)
 	}
 	info := context.readTypeInfos[index]
+	/*
+		todo: fix this logic for more elegant handle
+		There are two corner case:
+			1. value is pointer but read info not
+			2. value is not pointer but read info is pointer
+	*/
+	if value.Kind() == reflect.Ptr && IsNamespacedType(info.Serializer.TypeId()) {
+		info.Serializer = &ptrToStructSerializer{
+			type_:            value.Type().Elem(),
+			structSerializer: *info.Serializer.(*structSerializer),
+		}
+	} else if info.Type.Kind() == reflect.Ptr && value.Kind() != reflect.Ptr {
+		info.Type = info.Type.Elem()
+	}
 	return info, nil
 }
 
@@ -1189,7 +1203,7 @@ func (r *typeResolver) readTypeByReadTag(buffer *ByteBuffer) (reflect.Type, erro
 	return r.typeTagToSerializers[metaString].(*ptrToStructSerializer).type_, err
 }
 
-func (r *typeResolver) readTypeInfo(buffer *ByteBuffer) (TypeInfo, error) {
+func (r *typeResolver) readTypeInfo(buffer *ByteBuffer, value reflect.Value) (TypeInfo, error) {
 	// Read variable-length type ID
 	typeID := buffer.ReadVarInt32()
 	internalTypeID := typeID // Extract lower 8 bits for internal type ID
@@ -1198,7 +1212,7 @@ func (r *typeResolver) readTypeInfo(buffer *ByteBuffer) (TypeInfo, error) {
 	}
 	if IsNamespacedType(TypeId(internalTypeID)) {
 		if r.metaShareEnabled() {
-			return r.readSharedTypeMeta(buffer)
+			return r.readSharedTypeMeta(buffer, value)
 		}
 		// Read namespace and type name metadata bytes
 		nsBytes, err := r.metaStringResolver.ReadMetaStringBytes(buffer)

@@ -310,7 +310,7 @@ func (s sliceSerializer) readDifferentTypes(f *Fory, buf *ByteBuffer, value refl
 			continue
 		}
 
-		typeInfo, _ := f.typeResolver.readTypeInfo(buf)
+		typeInfo, _ := f.typeResolver.readTypeInfo(buf, value)
 
 		// Create new element and deserialize from buffer
 		elem := reflect.New(typeInfo.Type).Elem()

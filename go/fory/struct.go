@@ -389,7 +389,7 @@ func sortFields(
 		switch {
 		case isPrimitiveType(t.typeID):
 			boxed = append(boxed, t)
-		case isListType(t.typeID):
+		case isListType(t.typeID), isPrimitiveArrayType(t.typeID):
 			collection = append(collection, t)
 		case isSetType(t.typeID):
 			setFields = append(setFields, t)
@@ -416,7 +416,7 @@ func sortFields(
 		}
 		return ai.name < aj.name
 	})
-	sortTuple := func(s []triple) {
+	sortByTypeIDThenName := func(s []triple) {
 		sort.Slice(s, func(i, j int) bool {
 			if s[i].typeID != s[j].typeID {
 				return s[i].typeID < s[j].typeID
@@ -424,7 +424,7 @@ func sortFields(
 			return s[i].name < s[j].name
 		})
 	}
-	sortByTypeIDThenName := func(s []triple) {
+	sortTuple := func(s []triple) {
 		sort.Slice(s, func(i, j int) bool {
 			return s[i].name < s[j].name
 		})

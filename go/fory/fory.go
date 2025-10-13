@@ -539,25 +539,11 @@ func (f *Fory) readReferencableBySerializer(buf *ByteBuffer, value reflect.Value
 
 func (f *Fory) readData(buffer *ByteBuffer, value reflect.Value, serializer Serializer) (err error) {
 	if serializer == nil {
-		typeInfo, err := f.typeResolver.readTypeInfo(buffer)
+		typeInfo, err := f.typeResolver.readTypeInfo(buffer, value)
 		if err != nil {
 			return fmt.Errorf("read typeinfo failed: %w", err)
 		}
 		serializer = typeInfo.Serializer
-		/*
-			todo: fix this logic for more elegant handle
-			This is two corner case:
-				1. value is pointer but read info is not
-				2. value is not pointer but read info is pointer
-		*/
-		if value.Kind() == reflect.Ptr && IsNamespacedType(serializer.TypeId()) {
-			serializer = &ptrToStructSerializer{
-				type_:            value.Type().Elem(),
-				structSerializer: *serializer.(*structSerializer),
-			}
-		} else if typeInfo.Type.Kind() == reflect.Ptr && value.Kind() != reflect.Ptr {
-			typeInfo.Type = typeInfo.Type.Elem()
-		}
 
 		var concrete reflect.Value
 		var type_ reflect.Type

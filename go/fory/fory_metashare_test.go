@@ -18,6 +18,7 @@
 package fory
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -482,7 +483,7 @@ type compatibilityCase struct {
 func runCompatibilityCase(t *testing.T, tc compatibilityCase) {
 	t.Helper()
 
-	writer := NewForyWithOptions(WithCompatible(true), WithRefTracking(true))
+	writer := NewForyWithOptions(WithCompatible(true))
 	if tc.writerSetup != nil {
 		err := tc.writerSetup(writer)
 		assert.NoError(t, err)
@@ -493,7 +494,7 @@ func runCompatibilityCase(t *testing.T, tc compatibilityCase) {
 	data, err := writer.Marshal(tc.input)
 	assert.NoError(t, err)
 
-	reader := NewForyWithOptions(WithCompatible(true), WithRefTracking(true))
+	reader := NewForyWithOptions(WithCompatible(true))
 	if tc.readerSetup != nil {
 		err = tc.readerSetup(reader)
 		assert.NoError(t, err)
@@ -501,7 +502,12 @@ func runCompatibilityCase(t *testing.T, tc compatibilityCase) {
 	err = reader.RegisterNamedType(tc.readType, tc.tag)
 	assert.NoError(t, err)
 
-	var target interface{}
-	assert.Nil(t, reader.Unmarshal(data, &target))
-	tc.assertFunc(t, tc.input, target)
+	target := reflect.New(reflect.TypeOf(tc.readType))
+	var unmarshalErr error
+	assert.NotPanics(t, func() {
+		unmarshalErr = reader.Unmarshal(data, target.Interface())
+	})
+	assert.NoError(t, unmarshalErr)
+
+	tc.assertFunc(t, tc.input, target.Elem().Interface())
 }
