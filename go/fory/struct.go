@@ -338,6 +338,11 @@ func typesCompatible(actual, expected reflect.Type) bool {
 			return elementTypesCompatible(actual.Key(), expected.Key()) && elementTypesCompatible(actual.Elem(), expected.Elem())
 		}
 	}
+	// we can safely treat slice and array as same
+	if (actual.Kind() == reflect.Array && expected.Kind() == reflect.Slice) ||
+		(actual.Kind() == reflect.Slice && expected.Kind() == reflect.Array) {
+		return true
+	}
 	return false
 }
 

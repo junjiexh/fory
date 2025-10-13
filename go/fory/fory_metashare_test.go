@@ -18,7 +18,6 @@
 package fory
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,6 +58,26 @@ type MapDataClass struct {
 	Name     string
 	Metadata map[string]string
 	Counters map[string]int32
+}
+
+type ComplexObject1 struct {
+	F1  interface{}
+	F2  string
+	F3  []string
+	F4  map[int8]int32
+	F5  int8
+	F6  int16
+	F7  int32
+	F8  int64
+	F9  float32
+	F10 float64
+	F11 [2]int16
+	F12 []int16
+}
+
+type ComplexObject2 struct {
+	F1 interface{}
+	F2 map[int8]int32
 }
 
 type UnsortedStruct struct {
@@ -128,6 +147,48 @@ func TestCompatibleSerializationScenarios(t *testing.T) {
 				assert.Equal(t, in.Age, out.Age)
 				assert.Equal(t, in.Active, out.Active)
 				assert.Equal(t, in.Name, out.Name)
+			},
+		},
+		{
+			name:      "ComplexRoundTrip",
+			tag:       "ComplexObject1",
+			writeType: ComplexObject1{},
+			readType:  ComplexObject1{},
+			input: func() ComplexObject1 {
+				nested := ComplexObject2{
+					F1: true,
+					F2: map[int8]int32{-1: 2},
+				}
+				return ComplexObject1{
+					F1:  nested,
+					F2:  "abc",
+					F3:  []string{"abc", "abc"},
+					F4:  map[int8]int32{1: 2},
+					F5:  MaxInt8,
+					F6:  MaxInt16,
+					F7:  MaxInt32,
+					F8:  MaxInt64,
+					F9:  float32(0.5),
+					F10: 1 / 3.0,
+					F11: [2]int16{1, 2},
+					F12: []int16{-1, 4},
+				}
+			}(),
+			writerSetup: func(f *Fory) error {
+				return f.RegisterNamedType(ComplexObject2{}, "test.ComplexObject2")
+			},
+			readerSetup: func(f *Fory) error {
+				return f.RegisterNamedType(ComplexObject2{}, "test.ComplexObject2")
+			},
+			assertFunc: func(t *testing.T, input interface{}, output interface{}) {
+				in := input.(ComplexObject1)
+				out := output.(ComplexObject1)
+				assert.Equal(t, in, out)
+				inNested := in.F1.(ComplexObject2)
+				outNested, ok := out.F1.(ComplexObject2)
+				if assert.True(t, ok, "expected nested ComplexObject2 type") {
+					assert.Equal(t, inNested, outNested)
+				}
 			},
 		},
 		{
@@ -421,7 +482,7 @@ type compatibilityCase struct {
 func runCompatibilityCase(t *testing.T, tc compatibilityCase) {
 	t.Helper()
 
-	writer := NewForyWithOptions(WithCompatible(true))
+	writer := NewForyWithOptions(WithCompatible(true), WithRefTracking(true))
 	if tc.writerSetup != nil {
 		err := tc.writerSetup(writer)
 		assert.NoError(t, err)
@@ -432,7 +493,7 @@ func runCompatibilityCase(t *testing.T, tc compatibilityCase) {
 	data, err := writer.Marshal(tc.input)
 	assert.NoError(t, err)
 
-	reader := NewForyWithOptions(WithCompatible(true))
+	reader := NewForyWithOptions(WithCompatible(true), WithRefTracking(true))
 	if tc.readerSetup != nil {
 		err = tc.readerSetup(reader)
 		assert.NoError(t, err)
@@ -440,12 +501,7 @@ func runCompatibilityCase(t *testing.T, tc compatibilityCase) {
 	err = reader.RegisterNamedType(tc.readType, tc.tag)
 	assert.NoError(t, err)
 
-	target := reflect.New(reflect.TypeOf(tc.readType))
-	var unmarshalErr error
-	assert.NotPanics(t, func() {
-		unmarshalErr = reader.Unmarshal(data, target.Interface())
-	})
-	assert.NoError(t, unmarshalErr)
-
-	tc.assertFunc(t, tc.input, target.Elem().Interface())
+	var target interface{}
+	assert.Nil(t, reader.Unmarshal(data, &target))
+	tc.assertFunc(t, tc.input, target)
 }

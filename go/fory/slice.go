@@ -399,6 +399,8 @@ func (s *sliceConcreteValueSerializer) Read(f *Fory, buf *ByteBuffer, type_ refl
 		if err := readBySerializer(f, buf, value.Index(i), elemSerializer, s.referencable); err != nil {
 			return err
 		}
+
+		prevType = elemType
 	}
 	return nil
 }

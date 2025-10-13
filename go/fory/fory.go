@@ -544,13 +544,21 @@ func (f *Fory) readData(buffer *ByteBuffer, value reflect.Value, serializer Seri
 			return fmt.Errorf("read typeinfo failed: %w", err)
 		}
 		serializer = typeInfo.Serializer
-		// if value is a pointer to struct, convert to ptrToStructSerializer
+		/*
+			todo: fix this logic for more elegant handle
+			This is two corner case:
+				1. value is pointer but read info is not
+				2. value is not pointer but read info is pointer
+		*/
 		if value.Kind() == reflect.Ptr && IsNamespacedType(serializer.TypeId()) {
 			serializer = &ptrToStructSerializer{
 				type_:            value.Type().Elem(),
 				structSerializer: *serializer.(*structSerializer),
 			}
+		} else if typeInfo.Type.Kind() == reflect.Ptr && value.Kind() != reflect.Ptr {
+			typeInfo.Type = typeInfo.Type.Elem()
 		}
+
 		var concrete reflect.Value
 		var type_ reflect.Type
 		/*

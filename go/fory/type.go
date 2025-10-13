@@ -113,6 +113,8 @@ const (
 	ARROW_RECORD_BATCH = 38
 	// ARROW_TABLE an arrow table object
 	ARROW_TABLE = 39
+	// UNKNOWN an unknown type
+	UNKNOWN = 63
 
 	// UINT8 Unsigned 8-bit little-endian integer
 	UINT8 = 100 // Not in mapping table, assign a higher value
@@ -663,7 +665,7 @@ func (r *typeResolver) getTypeInfo(value reflect.Value, create bool) (TypeInfo, 
 		typeID = -NAMED_STRUCT
 	} else if value.Kind() == reflect.Map {
 		typeID = MAP
-	} else if value.Kind() == reflect.Array {
+	} else if value.Kind() == reflect.Array || value.Kind() == reflect.Slice {
 		type_ = reflect.SliceOf(type_.Elem())
 		return r.typesInfo[type_], nil
 	} else if isMultiDimensionaSlice(value) {
