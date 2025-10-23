@@ -16,7 +16,7 @@
 // under the License.
 
 use chrono::{NaiveDate, NaiveDateTime};
-use fory_core::buffer::{Reader, Writer};
+use fory_core::buffer::Reader;
 use fory_core::error::Error;
 use fory_core::resolver::context::{ReadContext, WriteContext};
 use fory_core::serializer::{ForyDefault, Serializer};
@@ -94,15 +94,9 @@ fn basic() {
     fory2.register_by_name::<Item>("item").unwrap();
     fory2.register_by_name::<Person>("person").unwrap();
     for fory in [fory1, fory2] {
-        let writer = Writer::default();
-        let mut write_context = WriteContext::new_from_fory(writer, &fory);
         let person = Person::default();
-        let bytes1 = fory
-            .serialize_with_context(&person, &mut write_context)
-            .unwrap();
-        let bytes2 = fory
-            .serialize_with_context(&person, &mut write_context)
-            .unwrap();
+        let bytes1 = fory.serialize(&person).unwrap();
+        let bytes2 = fory.serialize(&person).unwrap();
         let reader1 = Reader::new(bytes1.as_slice());
         let mut read_context1 = ReadContext::new_from_fory(reader1, &fory);
         assert_eq!(
